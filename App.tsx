@@ -349,6 +349,7 @@ function App() {
               nationalityCheck={flow.nationalityCheck}
               nationality={nationality}
               saving={saving}
+              onBack={goHome}
               onRetake={() => handleRetake(flow.documentType, flow.side)}
               onSave={() => handleSaveSide(flow.documentType, flow.side, flow.photo)}
             />
