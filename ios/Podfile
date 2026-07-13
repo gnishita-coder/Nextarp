@@ -31,5 +31,21 @@ target 'NextarpSDK' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Xcode 26.4 ships a newer Clang that tightened C++20 `consteval` validation,
+    # which breaks the `fmt` library React Native bundles (via RCT-Folly) with:
+    # "Call to consteval function ... is not a constant expression".
+    # Scoped fix: only the `fmt` pod is compiled against C++17, where consteval
+    # doesn't exist so the problematic code path is skipped in favor of fmt's
+    # runtime format-string validation. Everything else keeps using C++20.
+    # Remove this once React Native bumps its bundled fmt past this issue -
+    # see https://github.com/facebook/react-native/issues/55601
+    installer.pods_project.targets.each do |target|
+      if target.name == 'fmt'
+        target.build_configurations.each do |build_config|
+          build_config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+        end
+      end
+    end
   end
 end
