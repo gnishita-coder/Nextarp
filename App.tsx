@@ -60,6 +60,7 @@ import { DocumentDetailScreen } from './src/screens/DocumentDetailScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ScanningScreen } from './src/screens/ScanningScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
+import { BackSideScreen } from './src/screens/BackSideScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
 import { DocumentTypeSheet } from './src/components/DocumentTypeSheet';
 import { NationalitySheet } from './src/components/NationalitySheet';
@@ -78,24 +79,21 @@ import type {
   CaptureMode,
   CapturedPhoto,
   CapturedSide,
-  DocumentSide,
   DocumentType,
   Nationality,
   SavedDocument,
 } from './src/types';
-import { DOCUMENT_SIDES } from './src/types';
 
 const NATIONALITY_STORAGE_KEY = 'nextarp.nationality.v1';
 
-// The back side of a driving licence/passport has no face photo and, on
-// several real documents (e.g. Turkish and Spanish driving licences), no
+// The back side of a driving licence/passport never has a face photo (so
+// BackSideScreen doesn't run a face check at all - see its own comments) and,
+// on several real documents (e.g. Turkish and Spanish driving licences), no
 // printed country name either - it's mostly a table of vehicle category
-// codes. Running the face-detection and nationality/OCR checks against the
-// back side always produced a false "No ID photo detected" / "Doesn't match
-// <country>" warning, even for a correctly scanned document. Both checks are
-// only meaningful on the front side, so the back side gets these
-// "not applicable here" skipped results instead of actually running them.
-const SKIPPED_FACE_CHECK: FaceCheckResult = { hasFace: true, faceCount: 0, checkAvailable: false };
+// codes. Running the nationality/OCR check against the back side always
+// produced a false "Doesn't match <country>" warning, even for a correctly
+// scanned document, so BackSideScreen gets this "not applicable here" skipped
+// result instead of actually running the OCR check.
 const SKIPPED_NATIONALITY_CHECK: NationalityCheckResult = {
   matchesSelected: true,
   checkAvailable: false,
@@ -103,15 +101,25 @@ const SKIPPED_NATIONALITY_CHECK: NationalityCheckResult = {
 
 type Flow =
   | { screen: 'home' }
-  | { screen: 'scanning'; documentType: DocumentType; side: DocumentSide }
+  // The transitional "opening scanner" screen is only shown for the front
+  // side - back-side capture happens in place on BackSideScreen (its own
+  // "Capture back side" button shows a loading spinner instead).
+  | { screen: 'scanning'; documentType: DocumentType }
   | {
       screen: 'review';
       documentType: DocumentType;
-      side: DocumentSide;
       photo: CapturedPhoto;
       quality: QualityReport;
       faceCheck: FaceCheckResult;
       nationalityCheck: NationalityCheckResult;
+    }
+  | {
+      screen: 'backSide';
+      documentType: DocumentType;
+      /** Undefined until the user taps "Capture back side". */
+      photo?: CapturedPhoto;
+      quality?: QualityReport;
+      nationalityCheck?: NationalityCheckResult;
     }
   | {
       screen: 'success';
@@ -132,6 +140,10 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [flow, setFlow] = useState<Flow>({ screen: 'home' });
   const [saving, setSaving] = useState(false);
+  // Loading state for BackSideScreen's "Capture back side" button - unlike
+  // the front side, back-side capture doesn't navigate through the
+  // transitional ScanningScreen, it just shows a spinner in place.
+  const [capturingBack, setCapturingBack] = useState(false);
   // Which document (if any) is open in the full front+back "PDF style"
   // viewer within the Documents tab. Cleared whenever the user leaves that
   // tab so switching tabs and back doesn't leave a stale detail view open.
@@ -141,6 +153,13 @@ function App() {
   // Home header (see NationalitySheet) rather than a mandatory full-screen
   // step before every scan. Persisted so it's remembered next launch.
   const [nationality, setNationality] = useState<Nationality>('ES');
+  // Guards against starting a scan before the persisted nationality
+  // preference has actually finished loading from AsyncStorage - without
+  // this, a scan started in the brief window right after app launch could
+  // silently run (and save) against the 'ES' fallback above instead of
+  // whatever the user last chose (e.g. 'TR'), even though the flag chip
+  // on Home would shortly afterwards flip to show the correct one.
+  const [nationalityLoaded, setNationalityLoaded] = useState(false);
   const [nationalityPickerVisible, setNationalityPickerVisible] = useState(false);
   const [documentTypePickerVisible, setDocumentTypePickerVisible] = useState(false);
 
@@ -159,11 +178,13 @@ function App() {
   }, [refreshDocuments]);
 
   useEffect(() => {
-    AsyncStorage.getItem(NATIONALITY_STORAGE_KEY).then(stored => {
-      if (stored === 'ES' || stored === 'TR') {
-        setNationality(stored);
-      }
-    });
+    AsyncStorage.getItem(NATIONALITY_STORAGE_KEY)
+      .then(stored => {
+        if (stored === 'ES' || stored === 'TR') {
+          setNationality(stored);
+        }
+      })
+      .finally(() => setNationalityLoaded(true));
   }, []);
 
   const handleSelectNationality = useCallback((next: Nationality) => {
@@ -217,13 +238,14 @@ function App() {
     [refreshDocuments],
   );
 
-  /** Launches the OS-native scanner (VisionKit/ML Kit) for a given side, then
-   * runs our own quality analysis + face-presence check (faceCheck.ts) +
+  /** Launches the OS-native scanner (VisionKit/ML Kit) for the FRONT side,
+   * then runs quality analysis + face-presence check (faceCheck.ts) +
    * nationality/country text check (nationalityCheck.ts) against the
-   * currently selected nationality setting. */
-  const startScanForSide = useCallback(
-    async (documentType: DocumentType, side: DocumentSide) => {
-      setFlow({ screen: 'scanning', documentType, side });
+   * currently selected nationality setting. Lands on the front Review
+   * screen, whose Next button moves on to BackSideScreen. */
+  const startFrontScan = useCallback(
+    async (documentType: DocumentType) => {
+      setFlow({ screen: 'scanning', documentType });
       try {
         const result = await launchScanner({ quality: 0.9 });
 
@@ -237,7 +259,7 @@ function App() {
             result.errorMessage || 'The document scanner could not capture an image.',
             [
               { text: 'Cancel', style: 'cancel', onPress: goHome },
-              { text: 'Try again', onPress: () => startScanForSide(documentType, side) },
+              { text: 'Try again', onPress: () => startFrontScan(documentType) },
             ],
           );
           return;
@@ -245,22 +267,18 @@ function App() {
 
         const image = result.images[0];
         const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
-        // Face presence and nationality/OCR checks only apply to the front
-        // side - see SKIPPED_FACE_CHECK / SKIPPED_NATIONALITY_CHECK above.
         const [quality, faceCheck, nationalityCheck] = await Promise.all([
           analyzeImageQuality(image.uri, image.width, image.height, documentType),
-          side === 'front' ? checkContainsFace(image.uri) : Promise.resolve(SKIPPED_FACE_CHECK),
-          side === 'front'
-            ? checkNationalityMatch(image.uri, nationality)
-            : Promise.resolve(SKIPPED_NATIONALITY_CHECK),
+          checkContainsFace(image.uri),
+          checkNationalityMatch(image.uri, nationality),
         ]);
 
-        setFlow({ screen: 'review', documentType, side, photo, quality, faceCheck, nationalityCheck });
+        setFlow({ screen: 'review', documentType, photo, quality, faceCheck, nationalityCheck });
       } catch (err) {
         console.warn('[NextarpSDK] launchScanner failed', err);
         Alert.alert('Scanner error', 'Something went wrong opening the scanner.', [
           { text: 'Cancel', style: 'cancel', onPress: goHome },
-          { text: 'Try again', onPress: () => startScanForSide(documentType, side) },
+          { text: 'Try again', onPress: () => startFrontScan(documentType) },
         ]);
       }
     },
@@ -268,33 +286,113 @@ function App() {
   );
 
   const openDocumentTypePicker = useCallback(() => {
+    // See the nationalityLoaded comment above - don't let a scan start
+    // until we know for sure which nationality preference is actually in
+    // effect. In practice this resolves in a few milliseconds, so this
+    // essentially never blocks a real tap.
+    if (!nationalityLoaded) return;
     setDocumentTypePickerVisible(true);
-  }, []);
+  }, [nationalityLoaded]);
 
   const handleSelectDocumentType = useCallback(
     (documentType: DocumentType) => {
       setDocumentTypePickerVisible(false);
       setSessionSides([]);
       setSessionFolderPath(undefined);
-      startScanForSide(documentType, DOCUMENT_SIDES[documentType][0]);
+      startFrontScan(documentType);
     },
-    [startScanForSide],
+    [startFrontScan],
   );
 
-  const handleRetake = useCallback(
-    (documentType: DocumentType, side: DocumentSide) => {
-      startScanForSide(documentType, side);
+  const handleRetakeFront = useCallback(
+    (documentType: DocumentType) => {
+      startFrontScan(documentType);
     },
-    [startScanForSide],
+    [startFrontScan],
   );
 
-  const handleSaveSide = useCallback(
-    async (documentType: DocumentType, side: DocumentSide, photo: CapturedPhoto) => {
+  /** Front Review's Next button: persists the front photo to this
+   * document's folder, then moves on to BackSideScreen (which starts out
+   * with no photo yet, prompting the user to capture the back). */
+  const handleContinueToBackSide = useCallback(
+    async (documentType: DocumentType, photo: CapturedPhoto) => {
       setSaving(true);
       try {
         const { folderPath, side: savedSide } = await persistCapturedPhoto(
           documentType,
-          side,
+          'front',
+          photo.path,
+          photo.width,
+          photo.height,
+        );
+        setSessionSides([savedSide]);
+        setSessionFolderPath(folderPath);
+        setFlow({ screen: 'backSide', documentType });
+      } catch (err) {
+        console.warn('[NextarpSDK] Failed to save the front side', err);
+        Alert.alert(
+          'Save failed',
+          `The front side photo could not be saved.\n\n${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      } finally {
+        setSaving(false);
+      }
+    },
+    [],
+  );
+
+  /** BackSideScreen's "Capture back side" / Retake button. Runs in place
+   * (no ScanningScreen transition) - only quality analysis runs here, since
+   * the back of a driving licence/passport never has a face photo, and
+   * several real backs (Turkish, Spanish driving licence) have no printed
+   * country name either, so the nationality/OCR check is skipped (see
+   * SKIPPED_NATIONALITY_CHECK above). */
+  const handleCaptureBackSide = useCallback(async (documentType: DocumentType) => {
+    setCapturingBack(true);
+    try {
+      const result = await launchScanner({ quality: 0.9 });
+
+      if (result.didCancel) {
+        return;
+      }
+      if (result.error || !result.images || result.images.length === 0) {
+        Alert.alert(
+          'Scanner error',
+          result.errorMessage || 'The document scanner could not capture an image.',
+        );
+        return;
+      }
+
+      const image = result.images[0];
+      const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
+      const quality = await analyzeImageQuality(image.uri, image.width, image.height, documentType);
+
+      setFlow({
+        screen: 'backSide',
+        documentType,
+        photo,
+        quality,
+        nationalityCheck: SKIPPED_NATIONALITY_CHECK,
+      });
+    } catch (err) {
+      console.warn('[NextarpSDK] launchScanner failed', err);
+      Alert.alert('Scanner error', 'Something went wrong opening the scanner.');
+    } finally {
+      setCapturingBack(false);
+    }
+  }, []);
+
+  /** BackSideScreen's Save button - persists the back photo, writes the
+   * combined front+back document record to storage, and moves to Success. */
+  const handleSaveBackSide = useCallback(
+    async (documentType: DocumentType, photo: CapturedPhoto) => {
+      setSaving(true);
+      try {
+        const { folderPath, side: savedSide } = await persistCapturedPhoto(
+          documentType,
+          'back',
           photo.path,
           photo.width,
           photo.height,
@@ -302,41 +400,19 @@ function App() {
         );
 
         const updatedSides = [...sessionSides, savedSide];
-        setSessionSides(updatedSides);
-        setSessionFolderPath(folderPath);
-
-        const sidesToCapture = DOCUMENT_SIDES[documentType];
-        const sideIndex = sidesToCapture.indexOf(side);
-        const nextSide = sidesToCapture[sideIndex + 1];
-
-        if (nextSide) {
-          // IMPORTANT: launchScanner() presents a native full-screen modal
-          // (VisionKit/ML Kit). Calling it again immediately, in the same
-          // tick the previous instance is still animating its dismissal,
-          // can cause the second presentation to silently no-op on both
-          // iOS and Android - the screen just looks "stuck" and this side
-          // never gets saved, so saveDocumentRecord() is never reached and
-          // nothing shows up in Documents/Recent scans. A short delay lets
-          // the first modal's dismiss animation finish before we present
-          // the next one.
-          setTimeout(() => {
-            startScanForSide(documentType, nextSide);
-          }, 450);
-        } else {
-          await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
-          const afterSave = await getSavedDocuments();
-          console.log(
-            `[NextarpSDK] saved document record - ${afterSave.length} total documents now in storage`,
-          );
-          refreshDocuments();
-          setFlow({
-            screen: 'success',
-            documentType,
-            folderPath,
-            sides: updatedSides,
-            nationality,
-          });
-        }
+        await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
+        const afterSave = await getSavedDocuments();
+        console.log(
+          `[NextarpSDK] saved document record - ${afterSave.length} total documents now in storage`,
+        );
+        refreshDocuments();
+        setFlow({
+          screen: 'success',
+          documentType,
+          folderPath,
+          sides: updatedSides,
+          nationality,
+        });
       } catch (err) {
         // Surface this instead of only logging it - a silently-swallowed
         // failure here is exactly why a capture can look "saved" (Review's
@@ -353,7 +429,7 @@ function App() {
         setSaving(false);
       }
     },
-    [sessionSides, sessionFolderPath, nationality, refreshDocuments, startScanForSide],
+    [sessionSides, sessionFolderPath, nationality, refreshDocuments],
   );
 
   return (
@@ -406,13 +482,12 @@ function App() {
           />
 
           {flow.screen === 'scanning' && (
-            <ScanningScreen documentType={flow.documentType} side={flow.side} />
+            <ScanningScreen documentType={flow.documentType} side="front" />
           )}
 
           {flow.screen === 'review' && (
             <ReviewScreen
               documentType={flow.documentType}
-              side={flow.side}
               photoPath={flow.photo.path}
               photoWidth={flow.photo.width}
               photoHeight={flow.photo.height}
@@ -421,13 +496,25 @@ function App() {
               nationalityCheck={flow.nationalityCheck}
               nationality={nationality}
               saving={saving}
-              isLastSide={
-                DOCUMENT_SIDES[flow.documentType][DOCUMENT_SIDES[flow.documentType].length - 1] ===
-                flow.side
-              }
               onBack={goHome}
-              onRetake={() => handleRetake(flow.documentType, flow.side)}
-              onSave={() => handleSaveSide(flow.documentType, flow.side, flow.photo)}
+              onRetake={() => handleRetakeFront(flow.documentType)}
+              onNext={() => handleContinueToBackSide(flow.documentType, flow.photo)}
+            />
+          )}
+
+          {flow.screen === 'backSide' && (
+            <BackSideScreen
+              documentType={flow.documentType}
+              nationality={nationality}
+              photo={flow.photo}
+              quality={flow.quality}
+              nationalityCheck={flow.nationalityCheck}
+              capturing={capturingBack}
+              saving={saving}
+              onBack={goHome}
+              onCapture={() => handleCaptureBackSide(flow.documentType)}
+              onRetake={() => handleCaptureBackSide(flow.documentType)}
+              onSave={() => handleSaveBackSide(flow.documentType, flow.photo!)}
             />
           )}
 

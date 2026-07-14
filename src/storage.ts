@@ -11,8 +11,20 @@ function pad(n: number) {
 }
 
 function folderSuffix(date: Date) {
-  // e.g. 0714 -> month+day, matches the "driving_licence_0714" style folder name in the mockup
-  return `${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+  // e.g. 0714 -> month+day, matches the "driving_licence_0714" style folder
+  // name in the mockup. IMPORTANT: a time component (HHMMSS) is appended -
+  // without it, every driving-licence scan done on the same calendar day
+  // mapped to the exact same folder ("scanned_ids/driving_licence_0714")
+  // with fixed "front.jpg"/"back.jpg" filenames. A second scan that same
+  // day would silently overwrite the first scan's photos on disk, and
+  // because a PREVIOUSLY saved document's record still pointed at that same
+  // now-overwritten path, its thumbnail/preview would then show whichever
+  // scan was saved *last* - exactly the "Save shows the wrong document's
+  // photos" bug. Appending the time makes each capture session's folder
+  // unique, so different scans never share a path.
+  return `${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(
+    date.getMinutes(),
+  )}${pad(date.getSeconds())}`;
 }
 
 /**

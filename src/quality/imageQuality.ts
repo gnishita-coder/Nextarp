@@ -41,8 +41,21 @@ export interface QualityReport {
 
 // --- Tunable thresholds (starting points - see caveat above) ---
 const BLUR_THRESHOLD = 4;
-const GLARE_BRIGHT_LUMA = 250;
-const GLARE_RATIO_THRESHOLD = 0.06;
+// A plain white/light-coloured document background (very common on ID card
+// backs - white margins, light blue tint, "SPECIMEN" watermark paper) easily
+// sits in the 235-250 luma range and can cover a large fraction of the
+// frame. That's not glare, it's just what the document looks like. Real
+// specular glare/overexposure is much closer to fully clipped (~255) and,
+// critically, concentrated in a localized hotspot rather than spread evenly
+// across the whole card - see GLARE_HOTSPOT_* below.
+const GLARE_BRIGHT_LUMA = 253;
+const GLARE_RATIO_THRESHOLD = 0.25;
+// Splits the sampled grid into an N x N block grid so a concentrated
+// reflection (a small bright patch) can be told apart from a document that's
+// just naturally light-coloured/white all over. Only a block that's mostly
+// blown-out on its own counts as a real glare hotspot.
+const GLARE_HOTSPOT_BLOCK_GRID = 6;
+const GLARE_HOTSPOT_BLOCK_RATIO_THRESHOLD = 0.6;
 const MIN_WIDTH = 800;
 const MIN_HEIGHT = 500;
 const ANALYSIS_GRID_SIZE = 300; // downsample to roughly this many samples per axis
@@ -102,7 +115,13 @@ export async function analyzeImageQuality(
     isBlurry = blurScore < BLUR_THRESHOLD;
     brightness = pixelAnalysis.brightness;
     glareRatio = pixelAnalysis.glareRatio;
-    hasGlare = glareRatio > GLARE_RATIO_THRESHOLD;
+    // Flag glare either when the whole frame is blown out (glareRatio, a
+    // genuinely overexposed shot) OR when one localized block is almost
+    // entirely clipped (glareHotspotRatio, a reflection/hotspot) - not just
+    // because the document itself has a light/white background.
+    hasGlare =
+      glareRatio > GLARE_RATIO_THRESHOLD ||
+      pixelAnalysis.glareHotspotRatio > GLARE_HOTSPOT_BLOCK_RATIO_THRESHOLD;
 
     if (isBlurry) warnings.push('Image looks blurry - hold steady and retake.');
     if (hasGlare) warnings.push('Glare or overexposure detected - avoid direct light and retake.');
@@ -138,7 +157,17 @@ function analyzePixels(rgba: Uint8Array, width: number, height: number) {
   let brightSum = 0;
   let brightPixelCount = 0;
 
+  // Per-block bright-pixel counts, to tell a localized glare hotspot apart
+  // from a document that's simply light/white-coloured all over (see
+  // GLARE_HOTSPOT_* comments above).
+  const blockBrightCount = new Float64Array(GLARE_HOTSPOT_BLOCK_GRID * GLARE_HOTSPOT_BLOCK_GRID);
+  const blockTotalCount = new Float64Array(GLARE_HOTSPOT_BLOCK_GRID * GLARE_HOTSPOT_BLOCK_GRID);
+
   for (let gy = 0; gy < gridHeight; gy++) {
+    const blockY = Math.min(
+      GLARE_HOTSPOT_BLOCK_GRID - 1,
+      Math.floor((gy / gridHeight) * GLARE_HOTSPOT_BLOCK_GRID),
+    );
     for (let gx = 0; gx < gridWidth; gx++) {
       const x = gx * stepX;
       const y = gy * stepY;
@@ -149,8 +178,28 @@ function analyzePixels(rgba: Uint8Array, width: number, height: number) {
       const value = 0.299 * r + 0.587 * g + 0.114 * b;
       luma[gy * gridWidth + gx] = value;
       brightSum += value;
-      if (value >= GLARE_BRIGHT_LUMA) brightPixelCount++;
+
+      const blockX = Math.min(
+        GLARE_HOTSPOT_BLOCK_GRID - 1,
+        Math.floor((gx / gridWidth) * GLARE_HOTSPOT_BLOCK_GRID),
+      );
+      const blockIndex = blockY * GLARE_HOTSPOT_BLOCK_GRID + blockX;
+      blockTotalCount[blockIndex]++;
+
+      if (value >= GLARE_BRIGHT_LUMA) {
+        brightPixelCount++;
+        blockBrightCount[blockIndex]++;
+      }
     }
+  }
+
+  let glareHotspotRatio = 0;
+  for (let i = 0; i < blockTotalCount.length; i++) {
+    // Ignore near-empty blocks (e.g. a sliver at the grid edge) - too few
+    // samples to say anything meaningful about that block.
+    if (blockTotalCount[i] < 16) continue;
+    const blockRatio = blockBrightCount[i] / blockTotalCount[i];
+    if (blockRatio > glareHotspotRatio) glareHotspotRatio = blockRatio;
   }
 
   const totalSamples = gridWidth * gridHeight;
@@ -180,5 +229,6 @@ function analyzePixels(rgba: Uint8Array, width: number, height: number) {
     blurScore,
     brightness: totalSamples > 0 ? brightSum / totalSamples : 0,
     glareRatio: totalSamples > 0 ? brightPixelCount / totalSamples : 0,
+    glareHotspotRatio,
   };
 }

@@ -17,12 +17,11 @@ import { formatFileSize } from '../storage';
 import type { QualityReport } from '../quality/imageQuality';
 import type { FaceCheckResult } from '../vision/faceCheck';
 import type { NationalityCheckResult } from '../vision/nationalityCheck';
-import type { DocumentSide, DocumentType, Nationality } from '../types';
+import type { DocumentType, Nationality } from '../types';
 import { DOCUMENT_LABELS, NATIONALITY_LABELS } from '../types';
 
 interface Props {
   documentType: DocumentType;
-  side: DocumentSide;
   photoPath: string;
   photoWidth: number;
   photoHeight: number;
@@ -31,19 +30,23 @@ interface Props {
   nationalityCheck: NationalityCheckResult;
   nationality?: Nationality;
   saving?: boolean;
-  /** Whether this is the last side to capture for this document type - the
-   * front side of a two-sided document still has a back side left, so the
-   * primary button should read "Next" rather than imply the document is
-   * fully saved yet. Only the last side's button says "Save to folder". */
-  isLastSide: boolean;
   onBack: () => void;
   onRetake: () => void;
-  onSave: () => void;
+  /** Front side never saves the document on its own - it always moves on to
+   * the back-side capture screen. */
+  onNext: () => void;
 }
 
+/**
+ * Review screen for the FRONT side of a driving licence / passport. The back
+ * side has its own dedicated screen (see BackSideScreen.tsx), so this screen
+ * only ever needs two actions: Next (move on to the back side) and Retake
+ * (redo this capture) - and a single popup that appears whenever any check
+ * below is flagged red, whether that's blur/glare/resolution/orientation, a
+ * missing face, or a nationality mismatch.
+ */
 export function ReviewScreen({
   documentType,
-  side,
   photoPath,
   photoWidth,
   photoHeight,
@@ -52,10 +55,9 @@ export function ReviewScreen({
   nationalityCheck,
   nationality,
   saving,
-  isLastSide,
   onBack,
   onRetake,
-  onSave,
+  onNext,
 }: Props) {
   const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null);
   const [issueAlertVisible, setIssueAlertVisible] = useState(false);
@@ -89,8 +91,13 @@ export function ReviewScreen({
   // is a best-effort nudge, not a real verification.
   const nationalityMismatch = nationalityCheck.checkAvailable && !nationalityCheck.matchesSelected;
 
-  // Face check takes priority over nationality - only one popup is shown.
+  const overallPass = quality.overallPass && !noFaceDetected && !nationalityMismatch;
+
+  // The popup appears whenever ANY check below is red - not just face or
+  // nationality - so a blurry/glary/low-res/misaligned shot surfaces the
+  // same "something's off, retake or continue" prompt.
   const issueAlert = useMemo(() => {
+    if (overallPass) return null;
     if (noFaceDetected) {
       return {
         title: 'No ID photo detected',
@@ -103,8 +110,11 @@ export function ReviewScreen({
         body: `This document doesn't appear to match ${NATIONALITY_LABELS[nationality]}. Check the nationality or retake the photo.`,
       };
     }
-    return null;
-  }, [noFaceDetected, nationalityMismatch, nationality]);
+    return {
+      title: 'This scan needs another look',
+      body: "This photo didn't pass every quality check. Retake for a clearer shot, or continue if this is correct.",
+    };
+  }, [overallPass, noFaceDetected, nationalityMismatch, nationality]);
 
   useEffect(() => {
     setIssueAlertVisible(issueAlert != null);
@@ -123,7 +133,6 @@ export function ReviewScreen({
     return () => subscription.remove();
   }, [issueAlertVisible, onBack]);
 
-  const sideLabel = side === 'front' ? 'Front side' : 'Back side';
   const docLabel = DOCUMENT_LABELS[documentType];
   const uri = photoPath.startsWith('file://') ? photoPath : `file://${photoPath}`;
 
@@ -143,19 +152,6 @@ export function ReviewScreen({
     });
   }
 
-  const overallPass = quality.overallPass && !noFaceDetected && !nationalityMismatch;
-
-  // Only the final side's button implies the document is actually being
-  // saved to storage - earlier sides just move on to the next capture step,
-  // so the label should say "Next", not "Save to folder".
-  const primaryLabel = isLastSide
-    ? overallPass
-      ? 'Save to folder'
-      : 'Save anyway'
-    : overallPass
-      ? 'Next'
-      : 'Continue anyway';
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -174,7 +170,7 @@ export function ReviewScreen({
           </TouchableOpacity>
           <Text style={styles.title}>Review scan</Text>
           <Text style={styles.subtitle}>
-            {sideLabel} · {docLabel}
+            Front side · {docLabel}
           </Text>
         </View>
 
@@ -221,10 +217,12 @@ export function ReviewScreen({
 
         {!issueAlertVisible && (
           <View style={styles.actions}>
-            <PrimaryButton label={primaryLabel} onPress={onSave} loading={saving} />
-            {/* Only offer Retake when at least one check above is flagged red -
-                if every check passed there's nothing to retake for. */}
-            {!overallPass && (
+            {/* No "continue anyway" override - if a check above is flagged
+                red, Retake is the only option, same as BackSideScreen. Next
+                only ever appears once every check has passed. */}
+            {overallPass ? (
+              <PrimaryButton label="Next" onPress={onNext} loading={saving} />
+            ) : (
               <TouchableOpacity
                 style={[styles.retakeButton, saving && styles.retakeButtonDisabled]}
                 onPress={onRetake}
