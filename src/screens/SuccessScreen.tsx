@@ -1,5 +1,13 @@
-import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import {
+  Image,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import RNFS from 'react-native-fs';
@@ -13,7 +21,11 @@ interface Props {
   folderPath: string;
   sides: CapturedSide[];
   nationality?: Nationality;
-  onDone: () => void;
+  /** Called once the user confirms a name in the naming prompt below - the
+   * name they typed (already saved with the default label by this point,
+   * this just renames it) becomes what shows in Home's Recent scans and the
+   * Documents tab from then on. */
+  onSaveWithName: (name: string) => void;
   onScanAnother: () => void;
 }
 
@@ -22,13 +34,26 @@ export function SuccessScreen({
   folderPath,
   sides,
   nationality,
-  onDone,
+  onSaveWithName,
   onScanAnother,
 }: Props) {
   const docLabel = DOCUMENT_LABELS[documentType];
   const relativeFolder = folderPath.startsWith(RNFS.DocumentDirectoryPath)
     ? folderPath.slice(RNFS.DocumentDirectoryPath.length + 1)
     : folderPath;
+
+  const [nameModalVisible, setNameModalVisible] = useState(false);
+  const [nameInput, setNameInput] = useState(docLabel);
+
+  const openNamePrompt = () => {
+    setNameInput(docLabel);
+    setNameModalVisible(true);
+  };
+
+  const confirmName = () => {
+    setNameModalVisible(false);
+    onSaveWithName(nameInput.trim() || docLabel);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -73,10 +98,50 @@ export function SuccessScreen({
 
       <View style={styles.spacerBottom} />
 
-      <PrimaryButton label="Save" onPress={onDone} style={styles.saveButton} />
+      <PrimaryButton label="Save" onPress={openNamePrompt} style={styles.saveButton} />
       <TouchableOpacity style={styles.scanAnotherButton} onPress={onScanAnother}>
         <Text style={styles.scanAnotherLabel}>Scan another document</Text>
       </TouchableOpacity>
+
+      <Modal
+        visible={nameModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNameModalVisible(false)}>
+        <View style={styles.nameBackdrop}>
+          <TouchableOpacity
+            style={styles.nameBackdropTouchable}
+            activeOpacity={1}
+            onPress={() => setNameModalVisible(false)}
+          />
+          <View style={styles.nameCard}>
+            <Text style={styles.nameTitle}>Name this document</Text>
+            <Text style={styles.nameBody}>
+              Give it a name so it's easy to find later in Documents and Recent scans.
+            </Text>
+            <TextInput
+              style={styles.nameInput}
+              value={nameInput}
+              onChangeText={setNameInput}
+              placeholder={docLabel}
+              placeholderTextColor={colors.mutedLight}
+              autoFocus
+              selectTextOnFocus
+              returnKeyType="done"
+              onSubmitEditing={confirmName}
+            />
+            <PrimaryButton label="Save" onPress={confirmName} style={styles.nameSaveButton} />
+            <TouchableOpacity
+              style={styles.nameCancelButton}
+              onPress={() => setNameModalVisible(false)}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel">
+              <Text style={styles.nameCancelLabel}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -183,5 +248,62 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontWeight: '600',
     fontSize: 14,
+  },
+  nameBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 12, 30, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  nameBackdropTouchable: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  nameCard: {
+    width: '100%',
+    backgroundColor: colors.cardWhite,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    alignItems: 'stretch',
+  },
+  nameTitle: {
+    color: colors.navy,
+    fontWeight: '700',
+    fontSize: 18,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  nameBody: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  nameInput: {
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.navy,
+    backgroundColor: colors.backgroundSoft,
+    marginBottom: spacing.lg,
+  },
+  nameSaveButton: {
+    alignSelf: 'stretch',
+  },
+  nameCancelButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+  },
+  nameCancelLabel: {
+    color: colors.muted,
+    fontWeight: '600',
+    fontSize: 15,
   },
 });

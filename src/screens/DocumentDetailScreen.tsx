@@ -1,5 +1,13 @@
-import React from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import {
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from '../theme';
 import { formatRelativeTimestamp } from '../storage';
@@ -9,6 +17,8 @@ import { NATIONALITY_FLAGS, NATIONALITY_LABELS } from '../types';
 interface Props {
   document: SavedDocument;
   onBack: () => void;
+  /** Called with the trimmed new name when the user confirms a rename. */
+  onRename: (name: string) => void;
 }
 
 const SIDE_ORDER: Record<string, number> = { front: 0, back: 1 };
@@ -19,10 +29,26 @@ const SIDE_ORDER: Record<string, number> = { front: 0, back: 1 };
  * on a white background, similar to how a scanned multi-page PDF would be
  * presented, rather than just the small list-row thumbnail.
  */
-export function DocumentDetailScreen({ document, onBack }: Props) {
+export function DocumentDetailScreen({ document, onBack, onRename }: Props) {
   const sortedSides = [...document.sides].sort(
     (a, b) => (SIDE_ORDER[a.side] ?? 99) - (SIDE_ORDER[b.side] ?? 99),
   );
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(document.label);
+
+  const startEditingName = () => {
+    setNameInput(document.label);
+    setIsEditingName(true);
+  };
+
+  const confirmRename = () => {
+    setIsEditingName(false);
+    const trimmed = nameInput.trim();
+    if (trimmed.length > 0 && trimmed !== document.label) {
+      onRename(trimmed);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -36,15 +62,35 @@ export function DocumentDetailScreen({ document, onBack }: Props) {
           <Text style={styles.backGlyph}>{'‹'}</Text>
         </TouchableOpacity>
         <View style={styles.headerText}>
-          <Text style={styles.title} numberOfLines={1}>
-            {document.label}
-            {document.nationality ? ` ${NATIONALITY_FLAGS[document.nationality]}` : ''}
-          </Text>
+          {isEditingName ? (
+            <TextInput
+              style={styles.titleInput}
+              value={nameInput}
+              onChangeText={setNameInput}
+              autoFocus
+              selectTextOnFocus
+              returnKeyType="done"
+              onSubmitEditing={confirmRename}
+            />
+          ) : (
+            <Text style={styles.title} numberOfLines={1}>
+              {document.label}
+              {document.nationality ? ` ${NATIONALITY_FLAGS[document.nationality]}` : ''}
+            </Text>
+          )}
           <Text style={styles.subtitle}>
             {formatRelativeTimestamp(document.createdAt)}
             {document.nationality ? ` · ${NATIONALITY_LABELS[document.nationality]}` : ''}
           </Text>
         </View>
+        <TouchableOpacity
+          style={styles.renameButton}
+          onPress={isEditingName ? confirmRename : startEditingName}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={isEditingName ? 'Save name' : 'Rename document'}>
+          <Text style={styles.renameGlyph}>{isEditingName ? '✓' : '✎'}</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -101,10 +147,32 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.navy,
   },
+  titleInput: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: colors.navy,
+    borderBottomWidth: 1.5,
+    borderBottomColor: colors.purple,
+    paddingVertical: 0,
+    paddingBottom: 2,
+  },
   subtitle: {
     fontSize: 13,
     color: colors.muted,
     marginTop: 2,
+  },
+  renameButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 16,
+    backgroundColor: colors.cardWhite,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  renameGlyph: {
+    color: colors.purple,
+    fontSize: 17,
+    fontWeight: '700',
   },
   scrollContent: {
     paddingHorizontal: spacing.lg,

@@ -70,6 +70,7 @@ import {
   deleteDocument,
   getSavedDocuments,
   persistCapturedPhoto,
+  renameDocument,
   saveDocumentRecord,
 } from './src/storage';
 import { analyzeImageQuality, type QualityReport } from './src/quality/imageQuality';
@@ -123,6 +124,7 @@ type Flow =
     }
   | {
       screen: 'success';
+      documentId: string;
       documentType: DocumentType;
       folderPath: string;
       sides: CapturedSide[];
@@ -233,6 +235,22 @@ function App() {
       } catch (err) {
         console.warn('[NextarpSDK] Failed to delete document', err);
         Alert.alert('Delete failed', 'This document could not be deleted. Please try again.');
+      }
+    },
+    [refreshDocuments],
+  );
+
+  /** Rename icon on DocumentDetailScreen - unlike the Success screen's naming
+   * prompt, this stays on the detail screen afterwards rather than
+   * navigating home. */
+  const handleRenameDocument = useCallback(
+    async (id: string, name: string) => {
+      try {
+        await renameDocument(id, name);
+        refreshDocuments();
+      } catch (err) {
+        console.warn('[NextarpSDK] Failed to rename document', err);
+        Alert.alert('Rename failed', 'This document could not be renamed. Please try again.');
       }
     },
     [refreshDocuments],
@@ -400,7 +418,7 @@ function App() {
         );
 
         const updatedSides = [...sessionSides, savedSide];
-        await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
+        const record = await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
         const afterSave = await getSavedDocuments();
         console.log(
           `[NextarpSDK] saved document record - ${afterSave.length} total documents now in storage`,
@@ -408,6 +426,7 @@ function App() {
         refreshDocuments();
         setFlow({
           screen: 'success',
+          documentId: record.id,
           documentType,
           folderPath,
           sides: updatedSides,
@@ -430,6 +449,23 @@ function App() {
       }
     },
     [sessionSides, sessionFolderPath, nationality, refreshDocuments],
+  );
+
+  /** Success screen's naming prompt - the document is already saved with the
+   * default label by this point, so this just renames that record (which is
+   * why it shows up wherever `label` is rendered - Home's Recent scans and
+   * the Documents tab both read from the same saved `documents` state). */
+  const handleSaveWithName = useCallback(
+    async (documentId: string, name: string) => {
+      try {
+        await renameDocument(documentId, name);
+        refreshDocuments();
+      } catch (err) {
+        console.warn('[NextarpSDK] Failed to rename document', err);
+      }
+      goHome();
+    },
+    [refreshDocuments, goHome],
   );
 
   return (
@@ -457,6 +493,7 @@ function App() {
                     <DocumentDetailScreen
                       document={selectedDocument}
                       onBack={() => setSelectedDocumentId(null)}
+                      onRename={name => handleRenameDocument(selectedDocument.id, name)}
                     />
                   ) : (
                     <DocumentsScreen documents={documents} onOpenDocument={handleOpenDocument} />
@@ -524,7 +561,7 @@ function App() {
               folderPath={flow.folderPath}
               sides={flow.sides}
               nationality={flow.nationality}
-              onDone={goHome}
+              onSaveWithName={name => handleSaveWithName(flow.documentId, name)}
               onScanAnother={() => {
                 goHome();
                 openDocumentTypePicker();

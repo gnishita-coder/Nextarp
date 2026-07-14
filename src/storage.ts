@@ -87,6 +87,16 @@ export async function deleteDocument(id: string): Promise<void> {
   }
 }
 
+/** Overwrites a saved document's display label (e.g. a custom name the user
+ * typed in on the Success screen) without touching its files. Used so the
+ * custom name shows up everywhere the label is read from - Home's Recent
+ * scans list and the Documents tab both just render `label`. */
+export async function renameDocument(id: string, label: string): Promise<void> {
+  const existing = await getSavedDocuments();
+  const next = existing.map(doc => (doc.id === id ? { ...doc, label } : doc));
+  await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(next));
+}
+
 /** Deletes every saved document record and its files on disk. Used by Settings > Clear data (test build only). */
 export async function clearAllDocuments(): Promise<void> {
   const existing = await getSavedDocuments();
