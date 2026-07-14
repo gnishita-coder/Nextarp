@@ -94,10 +94,13 @@ export async function saveDocumentRecord(
 ): Promise<SavedDocument> {
   const existing = await getSavedDocuments();
 
+  const sideLabels = sides
+    .map(s => (s.side === 'front' ? 'Front Side' : 'Back Side'))
+    .join(' + ');
   const record: SavedDocument = {
     id: `${documentType}-${Date.now()}`,
     documentType,
-    label: DOCUMENT_LABELS[documentType],
+    label: `${DOCUMENT_LABELS[documentType]}: ${sideLabels}`,
     folderPath,
     sides,
     createdAt: new Date().toISOString(),

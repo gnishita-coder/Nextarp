@@ -59,6 +59,7 @@ import { DocumentsScreen } from './src/screens/DocumentsScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ScanningScreen } from './src/screens/ScanningScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
+import { BackSideScreen } from './src/screens/BackSideScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
 import { DocumentTypeSheet } from './src/components/DocumentTypeSheet';
 import { NationalitySheet } from './src/components/NationalitySheet';
@@ -98,6 +99,14 @@ type Flow =
       nationalityCheck: NationalityCheckResult;
     }
   | {
+      screen: 'backSide';
+      documentType: DocumentType;
+      folderPath: string;
+      photo?: CapturedPhoto;
+      quality?: QualityReport;
+      nationalityCheck?: NationalityCheckResult;
+    }
+  | {
       screen: 'success';
       documentType: DocumentType;
       folderPath: string;
@@ -123,6 +132,7 @@ function App() {
   const [nationality, setNationality] = useState<Nationality>('ES');
   const [nationalityPickerVisible, setNationalityPickerVisible] = useState(false);
   const [documentTypePickerVisible, setDocumentTypePickerVisible] = useState(false);
+  const [capturingBack, setCapturingBack] = useState(false);
 
   // Accumulates sides + folder path across a single document's capture session.
   const [sessionSides, setSessionSides] = useState<CapturedSide[]>([]);
@@ -154,6 +164,7 @@ function App() {
   const goHome = useCallback(() => {
     setSessionSides([]);
     setSessionFolderPath(undefined);
+    setCapturingBack(false);
     setActiveTab('home');
     setFlow({ screen: 'home' });
   }, []);
@@ -213,7 +224,9 @@ function App() {
       setDocumentTypePickerVisible(false);
       setSessionSides([]);
       setSessionFolderPath(undefined);
-      startScanForSide(documentType, DOCUMENT_SIDES[documentType][0]);
+      // Always start with the front side; back side is handled on BackSideScreen
+      // after the user taps Next on the front Review screen.
+      startScanForSide(documentType, 'front');
     },
     [startScanForSide],
   );
@@ -225,6 +238,127 @@ function App() {
     [startScanForSide],
   );
 
+  /** Front Review "Next": save front photo, then open the dedicated back-side screen. */
+  const handleNextToBackSide = useCallback(
+    async (documentType: DocumentType, photo: CapturedPhoto) => {
+      setSaving(true);
+      try {
+        const { folderPath, side: savedSide } = await persistCapturedPhoto(
+          documentType,
+          'front',
+          photo.path,
+          photo.width,
+          photo.height,
+          sessionFolderPath,
+        );
+        setSessionSides([savedSide]);
+        setSessionFolderPath(folderPath);
+        setFlow({ screen: 'backSide', documentType, folderPath });
+      } catch (err) {
+        console.warn('[NextarpSDK] Failed to save front side before back capture', err);
+        Alert.alert(
+          'Save failed',
+          `The front photo could not be saved.\n\n${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          [{ text: 'OK' }],
+        );
+      } finally {
+        setSaving(false);
+      }
+    },
+    [sessionFolderPath],
+  );
+
+  /** Opens the OS scanner for the back side and returns to BackSideScreen with the result. */
+  const handleCaptureBackSide = useCallback(
+    async (documentType: DocumentType, folderPath: string) => {
+      setCapturingBack(true);
+      try {
+        const result = await launchScanner({ quality: 0.9 });
+
+        if (result.didCancel) {
+          setFlow({ screen: 'backSide', documentType, folderPath });
+          return;
+        }
+        if (result.error || !result.images || result.images.length === 0) {
+          Alert.alert(
+            'Scanner error',
+            result.errorMessage || 'The document scanner could not capture an image.',
+            [{ text: 'OK' }],
+          );
+          setFlow({ screen: 'backSide', documentType, folderPath });
+          return;
+        }
+
+        const image = result.images[0];
+        const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
+        // Back side usually has no portrait - skip face check; still run quality + nationality.
+        const [quality, nationalityCheck] = await Promise.all([
+          analyzeImageQuality(image.uri, image.width, image.height, documentType),
+          checkNationalityMatch(image.uri, nationality),
+        ]);
+
+        setFlow({
+          screen: 'backSide',
+          documentType,
+          folderPath,
+          photo,
+          quality,
+          nationalityCheck,
+        });
+      } catch (err) {
+        console.warn('[NextarpSDK] back-side launchScanner failed', err);
+        Alert.alert('Scanner error', 'Something went wrong opening the scanner.', [{ text: 'OK' }]);
+        setFlow({ screen: 'backSide', documentType, folderPath });
+      } finally {
+        setCapturingBack(false);
+      }
+    },
+    [nationality],
+  );
+
+  const handleSaveBackSide = useCallback(
+    async (documentType: DocumentType, folderPath: string, photo: CapturedPhoto) => {
+      setSaving(true);
+      try {
+        const { side: savedBack } = await persistCapturedPhoto(
+          documentType,
+          'back',
+          photo.path,
+          photo.width,
+          photo.height,
+          folderPath,
+        );
+        const updatedSides = [...sessionSides.filter(s => s.side !== 'back'), savedBack];
+        setSessionSides(updatedSides);
+
+        await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
+        refreshDocuments();
+        setFlow({
+          screen: 'success',
+          documentType,
+          folderPath,
+          sides: updatedSides,
+          nationality,
+        });
+      } catch (err) {
+        console.warn('[NextarpSDK] Failed to save back side', err);
+        Alert.alert(
+          'Save failed',
+          `The back photo could not be saved.\n\n${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          [{ text: 'OK' }],
+        );
+      } finally {
+        setSaving(false);
+      }
+    },
+    [sessionSides, nationality, refreshDocuments],
+  );
+
+  /** Single-sided documents (if any) still save directly from Review. */
   const handleSaveSide = useCallback(
     async (documentType: DocumentType, side: DocumentSide, photo: CapturedPhoto) => {
       setSaving(true);
@@ -237,47 +371,20 @@ function App() {
           photo.height,
           sessionFolderPath,
         );
-
-        const updatedSides = [...sessionSides, savedSide];
+        const updatedSides = [...sessionSides.filter(s => s.side !== side), savedSide];
         setSessionSides(updatedSides);
         setSessionFolderPath(folderPath);
 
-        const sidesToCapture = DOCUMENT_SIDES[documentType];
-        const sideIndex = sidesToCapture.indexOf(side);
-        const nextSide = sidesToCapture[sideIndex + 1];
-
-        if (nextSide) {
-          // IMPORTANT: launchScanner() presents a native full-screen modal
-          // (VisionKit/ML Kit). Calling it again immediately, in the same
-          // tick the previous instance is still animating its dismissal,
-          // can cause the second presentation to silently no-op on both
-          // iOS and Android - the screen just looks "stuck" and this side
-          // never gets saved, so saveDocumentRecord() is never reached and
-          // nothing shows up in Documents/Recent scans. A short delay lets
-          // the first modal's dismiss animation finish before we present
-          // the next one.
-          setTimeout(() => {
-            startScanForSide(documentType, nextSide);
-          }, 450);
-        } else {
-          await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
-          const afterSave = await getSavedDocuments();
-          console.log(
-            `[NextarpSDK] saved document record - ${afterSave.length} total documents now in storage`,
-          );
-          refreshDocuments();
-          setFlow({
-            screen: 'success',
-            documentType,
-            folderPath,
-            sides: updatedSides,
-            nationality,
-          });
-        }
+        await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
+        refreshDocuments();
+        setFlow({
+          screen: 'success',
+          documentType,
+          folderPath,
+          sides: updatedSides,
+          nationality,
+        });
       } catch (err) {
-        // Surface this instead of only logging it - a silently-swallowed
-        // failure here is exactly why a capture can look "saved" (Review's
-        // button stops loading) while nothing actually landed in storage.
         console.warn('[NextarpSDK] Failed to save captured document', err);
         Alert.alert(
           'Save failed',
@@ -290,7 +397,7 @@ function App() {
         setSaving(false);
       }
     },
-    [sessionSides, sessionFolderPath, nationality, refreshDocuments, startScanForSide],
+    [sessionSides, sessionFolderPath, nationality, refreshDocuments],
   );
 
   return (
@@ -348,10 +455,37 @@ function App() {
               faceCheck={flow.faceCheck}
               nationalityCheck={flow.nationalityCheck}
               nationality={nationality}
+              hasNextSide={DOCUMENT_SIDES[flow.documentType].includes('back')}
               saving={saving}
               onBack={goHome}
               onRetake={() => handleRetake(flow.documentType, flow.side)}
-              onSave={() => handleSaveSide(flow.documentType, flow.side, flow.photo)}
+              onSave={() => {
+                if (DOCUMENT_SIDES[flow.documentType].includes('back')) {
+                  handleNextToBackSide(flow.documentType, flow.photo);
+                } else {
+                  handleSaveSide(flow.documentType, flow.side, flow.photo);
+                }
+              }}
+            />
+          )}
+
+          {flow.screen === 'backSide' && (
+            <BackSideScreen
+              documentType={flow.documentType}
+              nationality={nationality}
+              photo={flow.photo}
+              quality={flow.quality}
+              nationalityCheck={flow.nationalityCheck}
+              capturing={capturingBack}
+              saving={saving}
+              onBack={goHome}
+              onCapture={() => handleCaptureBackSide(flow.documentType, flow.folderPath)}
+              onRetake={() => handleCaptureBackSide(flow.documentType, flow.folderPath)}
+              onSave={() => {
+                if (flow.photo) {
+                  handleSaveBackSide(flow.documentType, flow.folderPath, flow.photo);
+                }
+              }}
             />
           )}
 

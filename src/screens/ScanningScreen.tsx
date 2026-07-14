@@ -16,14 +16,13 @@ interface Props {
  * full-screen modal - we don't render or control that part.
  */
 export function ScanningScreen({ documentType, side }: Props) {
-  const sideLabel = side === 'front' ? 'front side' : 'back side';
-  const docLabel = DOCUMENT_LABELS[documentType];
+  const sideLabel = side === 'front' ? 'Front Side' : 'Back Side';
 
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" color={colors.purple} />
       <Text style={styles.text}>
-        Opening scanner for the {sideLabel} of your {docLabel.toLowerCase()}...
+        Opening scanner for {DOCUMENT_LABELS[documentType]}: {sideLabel}...
       </Text>
     </View>
   );

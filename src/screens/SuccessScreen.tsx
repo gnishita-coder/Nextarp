@@ -73,7 +73,7 @@ export function SuccessScreen({
 
       <View style={styles.spacerBottom} />
 
-      <PrimaryButton label="Done" onPress={onDone} />
+      <PrimaryButton label="Done" onPress={onDone} style={styles.doneButton} />
       <TouchableOpacity style={styles.scanAnotherButton} onPress={onScanAnother}>
         <Text style={styles.scanAnotherLabel}>Scan another document</Text>
       </TouchableOpacity>
@@ -181,4 +181,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  doneButton: {
+  width: '100%',
+  marginBottom: spacing.sm,
+},
 });

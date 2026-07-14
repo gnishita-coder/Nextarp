@@ -16,51 +16,58 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { colors, primaryGradient, radius, spacing } from '../theme';
 import { formatFileSize } from '../storage';
 import type { QualityReport } from '../quality/imageQuality';
-import type { FaceCheckResult } from '../vision/faceCheck';
 import type { NationalityCheckResult } from '../vision/nationalityCheck';
-import type { DocumentSide, DocumentType, Nationality } from '../types';
+import type { CapturedPhoto, DocumentType, Nationality } from '../types';
 import { DOCUMENT_LABELS, NATIONALITY_LABELS } from '../types';
 
 interface Props {
   documentType: DocumentType;
-  side: DocumentSide;
-  photoPath: string;
-  photoWidth: number;
-  photoHeight: number;
-  quality: QualityReport;
-  faceCheck: FaceCheckResult;
-  nationalityCheck: NationalityCheckResult;
   nationality?: Nationality;
-  /** True when another document side still needs to be captured after this one. */
-  hasNextSide?: boolean;
+  /** Present after the user has captured (or retaken) the back side. */
+  photo?: CapturedPhoto;
+  quality?: QualityReport;
+  nationalityCheck?: NationalityCheckResult;
+  capturing?: boolean;
   saving?: boolean;
   onBack: () => void;
+  onCapture: () => void;
   onRetake: () => void;
   onSave: () => void;
 }
 
-export function ReviewScreen({
+/**
+ * Dedicated screen for capturing and reviewing the back side of a
+ * two-sided document (driving licence / passport). Opened from the front
+ * Review screen's Next button - not via a side-picker sheet.
+ */
+export function BackSideScreen({
   documentType,
-  side,
-  photoPath,
-  photoWidth,
-  photoHeight,
-  quality,
-  faceCheck,
-  nationalityCheck,
   nationality,
-  hasNextSide,
+  photo,
+  quality,
+  nationalityCheck,
+  capturing,
   saving,
   onBack,
+  onCapture,
   onRetake,
   onSave,
 }: Props) {
   const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null);
   const [issueAlertVisible, setIssueAlertVisible] = useState(false);
 
+  const docLabel = DOCUMENT_LABELS[documentType];
+  const hasPhoto = photo != null && quality != null;
+
   useEffect(() => {
+    if (!photo) {
+      setFileSizeBytes(null);
+      return;
+    }
     let cancelled = false;
-    const normalized = photoPath.startsWith('file://') ? photoPath.replace('file://', '') : photoPath;
+    const normalized = photo.path.startsWith('file://')
+      ? photo.path.replace('file://', '')
+      : photo.path;
     RNFS.stat(normalized)
       .then(stat => {
         if (!cancelled) setFileSizeBytes(Number(stat.size));
@@ -71,26 +78,12 @@ export function ReviewScreen({
     return () => {
       cancelled = true;
     };
-  }, [photoPath]);
+  }, [photo]);
 
-  // Face check only applies to the front side - the back of a driving
-  // licence / passport typically has no portrait photo.
-  const requireFaceCheck = side === 'front';
-  const noFaceDetected = requireFaceCheck && faceCheck.checkAvailable && !faceCheck.hasFace;
+  const nationalityMismatch =
+    !!nationalityCheck?.checkAvailable && !nationalityCheck.matchesSelected;
 
-  // Same "warning, not a block" reasoning as the face check - OCR accuracy
-  // on a scanned ID varies a lot with lighting/angle/print quality, so this
-  // is a best-effort nudge, not a real verification.
-  const nationalityMismatch = nationalityCheck.checkAvailable && !nationalityCheck.matchesSelected;
-
-  // Face check takes priority over nationality - only one popup is shown.
   const issueAlert = useMemo(() => {
-    if (noFaceDetected) {
-      return {
-        title: 'No ID photo detected',
-        body: "We couldn't find a face in this scan. Retake for a clearer shot, or continue if this is correct.",
-      };
-    }
     if (nationalityMismatch && nationality) {
       return {
         title: `Doesn't match ${NATIONALITY_LABELS[nationality]}`,
@@ -98,13 +91,12 @@ export function ReviewScreen({
       };
     }
     return null;
-  }, [noFaceDetected, nationalityMismatch, nationality]);
+  }, [nationalityMismatch, nationality]);
 
   useEffect(() => {
     setIssueAlertVisible(issueAlert != null);
-  }, [issueAlert, photoPath]);
+  }, [issueAlert, photo?.path]);
 
-  // Hardware / gesture back: dismiss issue popup first, otherwise go Home.
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (issueAlertVisible) {
@@ -117,28 +109,29 @@ export function ReviewScreen({
     return () => subscription.remove();
   }, [issueAlertVisible, onBack]);
 
-  const sideLabel = side === 'front' ? 'Front side' : 'Back side';
-  const docLabel = DOCUMENT_LABELS[documentType];
-  const uri = photoPath.startsWith('file://') ? photoPath : `file://${photoPath}`;
+  const checks: { label: string; pass: boolean }[] = hasPhoto
+    ? [
+        { label: 'Sharpness', pass: !quality.isBlurry },
+        { label: 'No glare / overexposure', pass: !quality.hasGlare },
+        { label: 'Resolution', pass: quality.resolutionOk },
+        { label: 'Aspect ratio / orientation', pass: quality.aspectRatioOk },
+      ]
+    : [];
 
-  const checks: { label: string; pass: boolean }[] = [
-    { label: 'Sharpness', pass: !quality.isBlurry },
-    { label: 'No glare / overexposure', pass: !quality.hasGlare },
-    { label: 'Resolution', pass: quality.resolutionOk },
-    { label: 'Aspect ratio / orientation', pass: quality.aspectRatioOk },
-  ];
-  if (requireFaceCheck && faceCheck.checkAvailable) {
-    checks.push({ label: 'ID photo detected', pass: faceCheck.hasFace });
-  }
-  if (nationalityCheck.checkAvailable && nationality) {
+  if (hasPhoto && nationalityCheck?.checkAvailable && nationality) {
     checks.push({
       label: `Matches ${NATIONALITY_LABELS[nationality]}`,
       pass: nationalityCheck.matchesSelected,
     });
   }
 
-  const overallPass = quality.overallPass && !noFaceDetected && !nationalityMismatch;
-  const primaryLabel = hasNextSide ? 'Next' : 'Save to folder';
+  const overallPass = hasPhoto && quality.overallPass && !nationalityMismatch;
+  const uri =
+    photo != null
+      ? photo.path.startsWith('file://')
+        ? photo.path
+        : `file://${photo.path}`
+      : null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -162,67 +155,91 @@ export function ReviewScreen({
               <Text style={styles.backGlyph}>{'‹'}</Text>
             </LinearGradient>
           </TouchableOpacity>
-          <Text style={styles.title}>Review scan</Text>
+          <Text style={styles.title}>{hasPhoto ? 'Review scan' : 'Back side'}</Text>
           <Text style={styles.subtitle}>
-            {docLabel}: {sideLabel}
+            {docLabel}: Back side
           </Text>
         </View>
 
-        <Image source={{ uri }} style={styles.preview} resizeMode="cover" />
+        {!hasPhoto ? (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Capture the back side</Text>
+            <Text style={styles.emptyBody}>
+              Flip your {docLabel.toLowerCase()} and scan the reverse side to finish this
+              document.
+            </Text>
+            <PrimaryButton
+              label="Capture back side"
+              onPress={onCapture}
+              loading={capturing}
+              style={styles.captureButton}
+            />
+          </View>
+        ) : (
+          <>
+            <Image source={{ uri: uri! }} style={styles.preview} resizeMode="cover" />
 
-        {quality.analysisUnavailable && (
-          <Text style={styles.analysisUnavailable}>
-            Couldn't run sharpness/glare analysis on this image - showing resolution and aspect
-            ratio checks only.
-          </Text>
-        )}
-
-        <View style={styles.checksCard}>
-          {checks.map((check, index) => (
-            <View
-              key={check.label}
-              style={[styles.qualityRow, index === checks.length - 1 && styles.qualityRowLast]}>
-              <View style={[styles.qualityDot, check.pass ? styles.qualityDotPass : styles.qualityDotFail]}>
-                <Text style={styles.qualityCheck}>{check.pass ? '✓' : '!'}</Text>
-              </View>
-              <Text style={[styles.qualityLabel, !check.pass && styles.qualityLabelFail]} numberOfLines={1}>
-                {check.label}
+            {quality.analysisUnavailable && (
+              <Text style={styles.analysisUnavailable}>
+                Couldn't run sharpness/glare analysis on this image - showing resolution and
+                aspect ratio checks only.
               </Text>
-            </View>
-          ))}
-        </View>
+            )}
 
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>
-              {fileSizeBytes != null ? formatFileSize(fileSizeBytes) : '—'}
-            </Text>
-            <Text style={styles.statLabel}>File size</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>
-              {photoWidth}×{photoHeight}
-            </Text>
-            <Text style={styles.statLabel}>Resolution</Text>
-          </View>
-        </View>
+            <View style={styles.checksCard}>
+              {checks.map((check, index) => (
+                <View
+                  key={check.label}
+                  style={[styles.qualityRow, index === checks.length - 1 && styles.qualityRowLast]}>
+                  <View
+                    style={[
+                      styles.qualityDot,
+                      check.pass ? styles.qualityDotPass : styles.qualityDotFail,
+                    ]}>
+                    <Text style={styles.qualityCheck}>{check.pass ? '✓' : '!'}</Text>
+                  </View>
+                  <Text
+                    style={[styles.qualityLabel, !check.pass && styles.qualityLabelFail]}
+                    numberOfLines={1}>
+                    {check.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.statsRow}>
+              <View style={styles.statCard}>
+                <Text style={styles.statValue}>
+                  {fileSizeBytes != null ? formatFileSize(fileSizeBytes) : '—'}
+                </Text>
+                <Text style={styles.statLabel}>File size</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statValue}>
+                  {photo.width}×{photo.height}
+                </Text>
+                <Text style={styles.statLabel}>Resolution</Text>
+              </View>
+            </View>
+          </>
+        )}
 
         <View style={styles.spacer} />
 
-        {!issueAlertVisible && (
+        {hasPhoto && !issueAlertVisible && (
           <View style={styles.actions}>
             {overallPass && (
               <PrimaryButton
-                label={primaryLabel}
+                label="Save to folder"
                 onPress={onSave}
                 loading={saving}
               />
             )}
             {!overallPass && (
               <TouchableOpacity
-                style={[styles.retakeButton, saving && styles.retakeButtonDisabled]}
+                style={[styles.retakeButton, (saving || capturing) && styles.retakeButtonDisabled]}
                 onPress={onRetake}
-                disabled={saving}
+                disabled={saving || capturing}
                 activeOpacity={0.7}>
                 <Text style={styles.retakeLabel}>Retake photo</Text>
               </TouchableOpacity>
@@ -249,18 +266,16 @@ export function ReviewScreen({
             <Text style={styles.alertTitle}>{issueAlert?.title}</Text>
             <Text style={styles.alertBody}>{issueAlert?.body}</Text>
             <TouchableOpacity
-              style={[styles.alertRetakeButton, saving && styles.retakeButtonDisabled]}
+              style={[styles.alertRetakeButton, capturing && styles.retakeButtonDisabled]}
               onPress={onRetake}
-              disabled={saving}
+              disabled={capturing}
               activeOpacity={0.7}>
               <Text style={styles.retakeLabel}>Retake photo</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.alertCloseButton}
               onPress={() => setIssueAlertVisible(false)}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="Close">
+              activeOpacity={0.7}>
               <Text style={styles.alertCloseLabel}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -319,6 +334,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
+  emptyCard: {
+    backgroundColor: colors.cardWhite,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    alignItems: 'center',
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.navy,
+    textAlign: 'center',
+  },
+  emptyBody: {
+    fontSize: 14,
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+    lineHeight: 20,
+  },
+  captureButton: {
+    alignSelf: 'stretch',
+  },
   preview: {
     width: '100%',
     aspectRatio: 16 / 10,
@@ -376,6 +414,54 @@ const styles = StyleSheet.create({
   qualityLabelFail: {
     color: colors.danger,
     fontWeight: '700',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginTop: spacing.lg,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: colors.cardWhite,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.purple,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: colors.muted,
+    marginTop: 2,
+  },
+  spacer: {
+    flex: 1,
+    minHeight: spacing.xl,
+  },
+  actions: {
+    marginTop: spacing.xl,
+  },
+  retakeButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.navy,
+    backgroundColor: colors.cardWhite,
+  },
+  retakeButtonDisabled: {
+    borderColor: colors.mutedLight,
+  },
+  retakeLabel: {
+    color: colors.navy,
+    fontWeight: '700',
+    fontSize: 15,
   },
   alertBackdrop: {
     flex: 1,
@@ -444,54 +530,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.cardWhite,
   },
   alertCloseLabel: {
-    color: colors.navy,
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.cardWhite,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.purple,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: colors.muted,
-    marginTop: 2,
-  },
-  spacer: {
-    flex: 1,
-    minHeight: spacing.xl,
-  },
-  actions: {
-    marginTop: -20,
-  },
-  retakeButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
-    marginBottom: spacing.md,
-    borderRadius: radius.pill,
-    borderWidth: 1.5,
-    borderColor: colors.navy,
-    backgroundColor: colors.cardWhite,
-  },
-  retakeButtonDisabled: {
-    borderColor: colors.mutedLight,
-  },
-  retakeLabel: {
     color: colors.navy,
     fontWeight: '700',
     fontSize: 15,
