@@ -60,6 +60,21 @@ export async function persistCapturedPhoto(
   };
 }
 
+/** Deletes a single saved document's record (from the AsyncStorage index) and
+ * its folder of photos on disk. Used by the Home screen's swipe-to-delete and
+ * the Documents tab. */
+export async function deleteDocument(id: string): Promise<void> {
+  const existing = await getSavedDocuments();
+  const target = existing.find(doc => doc.id === id);
+  const next = existing.filter(doc => doc.id !== id);
+  await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(next));
+  if (target) {
+    await RNFS.unlink(target.folderPath).catch(() => {
+      /* folder may already be gone - ignore */
+    });
+  }
+}
+
 /** Deletes every saved document record and its files on disk. Used by Settings > Clear data (test build only). */
 export async function clearAllDocuments(): Promise<void> {
   const existing = await getSavedDocuments();

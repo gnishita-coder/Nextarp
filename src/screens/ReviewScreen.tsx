@@ -34,6 +34,11 @@ interface Props {
   /** True when another document side still needs to be captured after this one. */
   hasNextSide?: boolean;
   saving?: boolean;
+  /** Whether this is the last side to capture for this document type - the
+   * front side of a two-sided document still has a back side left, so the
+   * primary button should read "Next" rather than imply the document is
+   * fully saved yet. Only the last side's button says "Save to folder". */
+  isLastSide: boolean;
   onBack: () => void;
   onRetake: () => void;
   onSave: () => void;
@@ -51,6 +56,7 @@ export function ReviewScreen({
   nationality,
   hasNextSide,
   saving,
+  isLastSide,
   onBack,
   onRetake,
   onSave,
@@ -138,7 +144,16 @@ export function ReviewScreen({
   }
 
   const overallPass = quality.overallPass && !noFaceDetected && !nationalityMismatch;
-  const primaryLabel = hasNextSide ? 'Next' : 'Save to folder';
+  // Only the final side's button implies the document is actually being
+  // saved to storage - earlier sides just move on to the next capture step,
+  // so the label should say "Next", not "Save to folder".
+  const primaryLabel = isLastSide
+    ? overallPass
+      ? 'Save to folder'
+      : 'Save anyway'
+    : overallPass
+      ? 'Next'
+      : 'Continue anyway';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -218,6 +233,18 @@ export function ReviewScreen({
                 loading={saving}
               />
             )}
+            {!overallPass && (
+              <TouchableOpacity
+                style={[styles.retakeButton, saving && styles.retakeButtonDisabled]}
+                onPress={onRetake}
+                disabled={saving}
+                activeOpacity={0.7}>
+                <Text style={styles.retakeLabel}>Retake photo</Text>
+              </TouchableOpacity>
+            )}
+            <PrimaryButton label={primaryLabel} onPress={onSave} loading={saving} />
+            {/* Only offer Retake when at least one check above is flagged red -
+                if every check passed there's nothing to retake for. */}
             {!overallPass && (
               <TouchableOpacity
                 style={[styles.retakeButton, saving && styles.retakeButtonDisabled]}

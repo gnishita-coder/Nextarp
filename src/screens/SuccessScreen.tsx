@@ -73,7 +73,7 @@ export function SuccessScreen({
 
       <View style={styles.spacerBottom} />
 
-      <PrimaryButton label="Done" onPress={onDone} style={styles.doneButton} />
+      <PrimaryButton label="Save" onPress={onDone} style={styles.saveButton} />
       <TouchableOpacity style={styles.scanAnotherButton} onPress={onScanAnother}>
         <Text style={styles.scanAnotherLabel}>Scan another document</Text>
       </TouchableOpacity>
@@ -170,6 +170,9 @@ const styles = StyleSheet.create({
   folderPath: {
     color: colors.muted,
     fontSize: 13,
+  },
+  saveButton: {
+    alignSelf: 'stretch',
   },
   scanAnotherButton: {
     alignItems: 'center',

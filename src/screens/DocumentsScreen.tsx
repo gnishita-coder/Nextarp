@@ -1,5 +1,5 @@
 import React from 'react';
-import { FlatList, Image, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GradientIconTile } from '../components/GradientIconTile';
 import { colors, radius, spacing } from '../theme';
@@ -9,10 +9,12 @@ import { NATIONALITY_FLAGS } from '../types';
 
 interface Props {
   documents: SavedDocument[];
+  /** Called when a row is tapped - opens that document's full front+back viewer. */
+  onOpenDocument: (id: string) => void;
 }
 
 /** Full list of every saved document, reached from the "View all" link or the Documents tab. */
-export function DocumentsScreen({ documents }: Props) {
+export function DocumentsScreen({ documents, onOpenDocument }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <Text style={styles.title}>My documents</Text>
@@ -30,7 +32,12 @@ export function DocumentsScreen({ documents }: Props) {
           </Text>
         }
         renderItem={({ item }) => (
-          <View style={styles.row}>
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => onOpenDocument(item.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${item.label}`}>
             {item.sides[0]?.uri ? (
               <Image source={{ uri: item.sides[0].uri }} style={styles.thumbnail} resizeMode="cover" />
             ) : (
@@ -47,7 +54,7 @@ export function DocumentsScreen({ documents }: Props) {
               </Text>
             </View>
             <Text style={styles.chevron}>{'>'}</Text>
-          </View>
+          </TouchableOpacity>
         )}
       />
     </SafeAreaView>
