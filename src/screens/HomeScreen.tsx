@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { GradientIconTile } from '../components/GradientIconTile';
 import { FrameCornersIcon, TapIcon } from '../components/ModeIcons';
+import { SwipeableRow } from '../components/SwipeableRow';
 import { colors, primaryGradient, radius, spacing } from '../theme';
 import { formatRelativeTimestamp } from '../storage';
 import type { CaptureMode, Nationality, SavedDocument } from '../types';
@@ -23,7 +24,10 @@ interface Props {
   onChangeCaptureMode: (mode: CaptureMode) => void;
   /** Called when the user taps Automatic or Manual - should open the document-type picker. */
   onRequestScan: () => void;
+  /** Called for "View all" and for tapping any row - both take the user to the Documents tab. */
   onViewAllDocuments: () => void;
+  /** Called when a row is swiped left and its Delete button is tapped. */
+  onDeleteDocument: (id: string) => void;
   /** Currently selected nationality (small header icon) and handler to open its picker sheet. */
   nationality: Nationality;
   onPressNationality: () => void;
@@ -35,6 +39,7 @@ export function HomeScreen({
   onChangeCaptureMode,
   onRequestScan,
   onViewAllDocuments,
+  onDeleteDocument,
   nationality,
   onPressNationality,
 }: Props) {
@@ -163,23 +168,30 @@ export function HomeScreen({
           </Text>
         }
         renderItem={({ item }) => (
-          <View style={styles.row}>
-            {item.sides[0]?.uri ? (
-              <Image source={{ uri: item.sides[0].uri }} style={styles.thumbnail} resizeMode="cover" />
-            ) : (
-              <GradientIconTile documentType={item.documentType} size={48} />
-            )}
-            <View style={styles.rowText}>
-              <Text style={styles.rowTitle}>
-                {item.label}
-                {item.nationality ? ` ${NATIONALITY_FLAGS[item.nationality]}` : ''}
-              </Text>
-              <Text style={styles.rowTimestamp}>
-                {formatRelativeTimestamp(item.createdAt)}
-              </Text>
-            </View>
-            <Text style={styles.chevron}>{'>'}</Text>
-          </View>
+          <SwipeableRow style={styles.swipeWrap} onDelete={() => onDeleteDocument(item.id)}>
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.7}
+              onPress={onViewAllDocuments}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${item.label} in Documents`}>
+              {item.sides[0]?.uri ? (
+                <Image source={{ uri: item.sides[0].uri }} style={styles.thumbnail} resizeMode="cover" />
+              ) : (
+                <GradientIconTile documentType={item.documentType} size={48} />
+              )}
+              <View style={styles.rowText}>
+                <Text style={styles.rowTitle}>
+                  {item.label}
+                  {item.nationality ? ` ${NATIONALITY_FLAGS[item.nationality]}` : ''}
+                </Text>
+                <Text style={styles.rowTimestamp}>
+                  {formatRelativeTimestamp(item.createdAt)}
+                </Text>
+              </View>
+              <Text style={styles.chevron}>{'>'}</Text>
+            </TouchableOpacity>
+          </SwipeableRow>
         )}
       />
     </SafeAreaView>
@@ -373,13 +385,15 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     lineHeight: 20,
   },
+  swipeWrap: {
+    marginBottom: spacing.sm,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.cardWhite,
     borderRadius: radius.md,
     padding: spacing.md,
-    marginBottom: spacing.sm,
     gap: spacing.md,
   },
   thumbnail: {

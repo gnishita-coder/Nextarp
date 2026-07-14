@@ -56,6 +56,7 @@ import { launchScanner } from '@dariyd/react-native-document-scanner';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { DocumentsScreen } from './src/screens/DocumentsScreen';
+import { DocumentDetailScreen } from './src/screens/DocumentDetailScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ScanningScreen } from './src/screens/ScanningScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
@@ -65,6 +66,7 @@ import { NationalitySheet } from './src/components/NationalitySheet';
 import { BottomTabBar, type TabKey } from './src/components/BottomTabBar';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import {
+  deleteDocument,
   getSavedDocuments,
   persistCapturedPhoto,
   saveDocumentRecord,
@@ -84,6 +86,20 @@ import type {
 import { DOCUMENT_SIDES } from './src/types';
 
 const NATIONALITY_STORAGE_KEY = 'nextarp.nationality.v1';
+
+// The back side of a driving licence/passport has no face photo and, on
+// several real documents (e.g. Turkish and Spanish driving licences), no
+// printed country name either - it's mostly a table of vehicle category
+// codes. Running the face-detection and nationality/OCR checks against the
+// back side always produced a false "No ID photo detected" / "Doesn't match
+// <country>" warning, even for a correctly scanned document. Both checks are
+// only meaningful on the front side, so the back side gets these
+// "not applicable here" skipped results instead of actually running them.
+const SKIPPED_FACE_CHECK: FaceCheckResult = { hasFace: true, faceCount: 0, checkAvailable: false };
+const SKIPPED_NATIONALITY_CHECK: NationalityCheckResult = {
+  matchesSelected: true,
+  checkAvailable: false,
+};
 
 type Flow =
   | { screen: 'home' }
@@ -116,6 +132,10 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [flow, setFlow] = useState<Flow>({ screen: 'home' });
   const [saving, setSaving] = useState(false);
+  // Which document (if any) is open in the full front+back "PDF style"
+  // viewer within the Documents tab. Cleared whenever the user leaves that
+  // tab so switching tabs and back doesn't leave a stale detail view open.
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
 
   // App-wide nationality setting, chosen from the small flag icon in the
   // Home header (see NationalitySheet) rather than a mandatory full-screen
@@ -131,6 +151,8 @@ function App() {
   const refreshDocuments = useCallback(() => {
     getSavedDocuments().then(setDocuments);
   }, []);
+
+  const selectedDocument = documents.find(doc => doc.id === selectedDocumentId) ?? null;
 
   useEffect(() => {
     refreshDocuments();
@@ -157,6 +179,43 @@ function App() {
     setActiveTab('home');
     setFlow({ screen: 'home' });
   }, []);
+
+  /** Home row taps and "View all" both take the user to the Documents tab
+   * (list view, not a specific document's detail screen). */
+  const handleOpenDocumentsTab = useCallback(() => {
+    setSelectedDocumentId(null);
+    setActiveTab('documents');
+  }, []);
+
+  /** Tapping a row inside the Documents tab opens that document's full
+   * front+back "PDF style" viewer. */
+  const handleOpenDocument = useCallback((id: string) => {
+    setSelectedDocumentId(id);
+  }, []);
+
+  const handleChangeTab = useCallback((tab: TabKey) => {
+    if (tab !== 'documents') {
+      setSelectedDocumentId(null);
+    }
+    setActiveTab(tab);
+  }, []);
+
+  /** Deletes a document's storage record and on-disk photos. Used by the
+   * Home screen's swipe-to-delete - since Documents and Home both render
+   * from the same `documents` state, this removes it from both places. */
+  const handleDeleteDocument = useCallback(
+    async (id: string) => {
+      try {
+        await deleteDocument(id);
+        setSelectedDocumentId(current => (current === id ? null : current));
+        refreshDocuments();
+      } catch (err) {
+        console.warn('[NextarpSDK] Failed to delete document', err);
+        Alert.alert('Delete failed', 'This document could not be deleted. Please try again.');
+      }
+    },
+    [refreshDocuments],
+  );
 
   /** Launches the OS-native scanner (VisionKit/ML Kit) for a given side, then
    * runs our own quality analysis + face-presence check (faceCheck.ts) +
@@ -186,10 +245,14 @@ function App() {
 
         const image = result.images[0];
         const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
+        // Face presence and nationality/OCR checks only apply to the front
+        // side - see SKIPPED_FACE_CHECK / SKIPPED_NATIONALITY_CHECK above.
         const [quality, faceCheck, nationalityCheck] = await Promise.all([
           analyzeImageQuality(image.uri, image.width, image.height, documentType),
-          checkContainsFace(image.uri),
-          checkNationalityMatch(image.uri, nationality),
+          side === 'front' ? checkContainsFace(image.uri) : Promise.resolve(SKIPPED_FACE_CHECK),
+          side === 'front'
+            ? checkNationalityMatch(image.uri, nationality)
+            : Promise.resolve(SKIPPED_NATIONALITY_CHECK),
         ]);
 
         setFlow({ screen: 'review', documentType, side, photo, quality, faceCheck, nationalityCheck });
@@ -307,17 +370,26 @@ function App() {
                     captureMode={captureMode}
                     onChangeCaptureMode={setCaptureMode}
                     onRequestScan={openDocumentTypePicker}
-                    onViewAllDocuments={() => setActiveTab('documents')}
+                    onViewAllDocuments={handleOpenDocumentsTab}
+                    onDeleteDocument={handleDeleteDocument}
                     nationality={nationality}
                     onPressNationality={() => setNationalityPickerVisible(true)}
                   />
                 )}
-                {activeTab === 'documents' && <DocumentsScreen documents={documents} />}
+                {activeTab === 'documents' &&
+                  (selectedDocument ? (
+                    <DocumentDetailScreen
+                      document={selectedDocument}
+                      onBack={() => setSelectedDocumentId(null)}
+                    />
+                  ) : (
+                    <DocumentsScreen documents={documents} onOpenDocument={handleOpenDocument} />
+                  ))}
                 {activeTab === 'settings' && (
                   <SettingsScreen documentCount={documents.length} onDataCleared={refreshDocuments} />
                 )}
               </View>
-              <BottomTabBar active={activeTab} onChange={setActiveTab} />
+              <BottomTabBar active={activeTab} onChange={handleChangeTab} />
             </>
           )}
 
@@ -349,6 +421,10 @@ function App() {
               nationalityCheck={flow.nationalityCheck}
               nationality={nationality}
               saving={saving}
+              isLastSide={
+                DOCUMENT_SIDES[flow.documentType][DOCUMENT_SIDES[flow.documentType].length - 1] ===
+                flow.side
+              }
               onBack={goHome}
               onRetake={() => handleRetake(flow.documentType, flow.side)}
               onSave={() => handleSaveSide(flow.documentType, flow.side, flow.photo)}
