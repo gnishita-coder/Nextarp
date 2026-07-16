@@ -1,8 +1,8 @@
 import React from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
-import { colors, primaryGradient } from '../theme';
+import { colors, elevationShadow, primaryGradient } from '../theme';
 import { FolderIcon, HomeIcon, SettingsIcon } from './TabIcons';
 
 export type TabKey = 'home' | 'documents' | 'settings';
@@ -73,17 +73,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 8,
     paddingHorizontal: 6,
-    ...Platform.select({
-      ios: {
-        shadowColor: colors.navy,
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.14,
-        shadowRadius: 16,
-      },
-      android: {
-        elevation: 10,
-      },
-    }),
+    ...elevationShadow('tabBar'),
   },
   tab: {
     flex: 1,
@@ -97,17 +87,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: colors.purple,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.45,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 6,
-      },
-    }),
+    ...elevationShadow('bubble'),
   },
   glossHighlight: {
     position: 'absolute',

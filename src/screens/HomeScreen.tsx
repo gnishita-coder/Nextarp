@@ -2,7 +2,6 @@ import React from 'react';
 import {
   FlatList,
   Image,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,7 +12,7 @@ import LinearGradient from 'react-native-linear-gradient';
 import { GradientIconTile } from '../components/GradientIconTile';
 import { FrameCornersIcon, TapIcon } from '../components/ModeIcons';
 import { SwipeableRow } from '../components/SwipeableRow';
-import { colors, primaryGradient, radius, spacing } from '../theme';
+import { colors, elevationShadow, heroModeColors, primaryGradient, radius, spacing } from '../theme';
 import { formatRelativeTimestamp } from '../storage';
 import type { CaptureMode, Nationality, SavedDocument } from '../types';
 import { NATIONALITY_FLAGS, NATIONALITY_CODES } from '../types';
@@ -74,12 +73,13 @@ export function HomeScreen({
         </View>
       </View>
 
-      <LinearGradient
-        colors={primaryGradient.colors}
-        start={primaryGradient.start}
-        end={primaryGradient.end}
-        style={styles.heroCard}
-      >
+      <View style={styles.heroCard}>
+        <LinearGradient
+          colors={primaryGradient.colors}
+          start={primaryGradient.start}
+          end={primaryGradient.end}
+          style={StyleSheet.absoluteFillObject}
+        />
         <View style={styles.heroBlob} pointerEvents="none" />
 
         <View style={styles.heroIconWrap}>
@@ -90,7 +90,10 @@ export function HomeScreen({
 
         <View style={styles.modeRow}>
           <TouchableOpacity
-            style={[styles.modeButton, captureMode === 'automatic' && styles.modeButtonActive]}
+            style={[
+              styles.modeButton,
+              captureMode === 'automatic' ? styles.modeButtonActive : styles.modeButtonInactive,
+            ]}
             activeOpacity={0.85}
             onPress={() => {
               onChangeCaptureMode('automatic');
@@ -121,7 +124,10 @@ export function HomeScreen({
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.modeButton, captureMode === 'manual' && styles.modeButtonActive]}
+            style={[
+              styles.modeButton,
+              captureMode === 'manual' ? styles.modeButtonActive : styles.modeButtonInactive,
+            ]}
             activeOpacity={0.85}
             onPress={() => {
               onChangeCaptureMode('manual');
@@ -147,7 +153,7 @@ export function HomeScreen({
             </Text>
           </TouchableOpacity>
         </View>
-      </LinearGradient>
+      </View>
 
       <View style={styles.listHeader}>
         <Text style={styles.listTitle}>Recent scans</Text>
@@ -245,11 +251,7 @@ const styles = StyleSheet.create({
     color: colors.navy,
   },
   avatarShadowWrap: {
-    shadowColor: colors.purple,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
+    ...elevationShadow('avatar'),
   },
   avatar: {
     width: 48,
@@ -278,6 +280,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: spacing.lg,
     overflow: 'hidden',
+    position: 'relative',
   },
   heroBlob: {
     position: 'absolute',
@@ -310,12 +313,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: spacing.md,
     borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     gap: 6,
   },
   modeButtonActive: {
     backgroundColor: '#FFFFFF',
+  },
+  modeButtonInactive: {
+    backgroundColor: heroModeColors.buttonInactive,
+    borderWidth: 1,
+    borderColor: heroModeColors.buttonInactiveBorder,
   },
   modeIconBubble: {
     width: 34,
@@ -325,20 +332,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  modeIconBubbleActive: {
-    backgroundColor: colors.purple,
-    ...Platform.select({
-      ios: {
-        shadowColor: colors.purple,
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.5,
-        shadowRadius: 6,
-      },
-      android: { elevation: 4 },
-    }),
-  },
+  modeIconBubbleActive: heroModeColors.iconBubbleActive,
   modeIconBubbleInactive: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: heroModeColors.iconBubbleInactive,
   },
   modeIconGloss: {
     position: 'absolute',
@@ -377,7 +373,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   listContent: {
-    paddingBottom: spacing.xl,
+    paddingBottom: 96,
   },
   emptyText: {
     color: colors.muted,

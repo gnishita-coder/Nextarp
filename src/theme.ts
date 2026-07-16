@@ -3,6 +3,8 @@
  * Values are matched against the approved UI mockups (ID vault / scan / review / success).
  */
 
+import { Platform, type ViewStyle } from 'react-native';
+
 export const colors = {
   background: '#F4F2FB',
   backgroundSoft: '#F8F6FD',
@@ -63,4 +65,73 @@ export const typography = {
   heading: { fontSize: 20, fontWeight: '700' as const, color: colors.navy },
   body: { fontSize: 15, fontWeight: '600' as const, color: colors.navy },
   caption: { fontSize: 13, fontWeight: '400' as const, color: colors.muted },
+};
+
+/** Cross-platform shadows tuned so iOS matches the softer Android elevation look. */
+export function elevationShadow(
+  level: 'tabBar' | 'bubble' | 'tile' | 'avatar',
+): ViewStyle {
+  const presets: Record<typeof level, ViewStyle> = {
+    tabBar: Platform.select({
+      ios: {
+        shadowColor: colors.navy,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.1,
+        shadowRadius: 14,
+      },
+      android: { elevation: 10 },
+      default: {},
+    })!,
+    bubble: Platform.select({
+      ios: {
+        shadowColor: colors.purple,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.35,
+        shadowRadius: 6,
+      },
+      android: { elevation: 6 },
+      default: {},
+    })!,
+    tile: Platform.select({
+      ios: {
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: { elevation: 5 },
+      default: {},
+    })!,
+    avatar: Platform.select({
+      ios: {
+        shadowColor: colors.purple,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.35,
+        shadowRadius: 8,
+      },
+      android: { elevation: 6 },
+      default: {},
+    })!,
+  };
+  return presets[level];
+}
+
+/** Frosted-glass styling for inactive Automatic/Manual tiles on the hero card. */
+export const heroModeColors = {
+  buttonInactive: 'rgba(255,255,255,0.18)',
+  buttonInactiveBorder: 'rgba(255,255,255,0.28)',
+  iconBubbleInactive: 'rgba(255,255,255,0.22)',
+  iconBubbleActive: Platform.select({
+    ios: {
+      backgroundColor: colors.purple,
+      shadowColor: colors.purple,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.35,
+      shadowRadius: 6,
+    },
+    android: {
+      backgroundColor: colors.purple,
+      elevation: 4,
+    },
+    default: { backgroundColor: colors.purple },
+  })!,
 };

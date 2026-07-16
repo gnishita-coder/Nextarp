@@ -1,0 +1,255 @@
+diff --git a/node_modules/@dariyd/react-native-document-scanner/android/src/main/java/com/docscanner/DocumentScannerModule.java b/node_modules/@dariyd/react-native-document-scanner/android/src/main/java/com/docscanner/DocumentScannerModule.java
+index 0fe9fff..222493a 100644
+--- a/node_modules/@dariyd/react-native-document-scanner/android/src/main/java/com/docscanner/DocumentScannerModule.java
++++ b/node_modules/@dariyd/react-native-document-scanner/android/src/main/java/com/docscanner/DocumentScannerModule.java
+@@ -148,11 +148,17 @@ public class DocumentScannerModule extends com.docscanner.NativeDocumentScannerS
+     }
+ 
+     private void startScanner(Activity activity) {
+-        // Configure the scanner
++        // Always one page for ID front/back capture sessions.
++        int pageLimit = 1;
++        if (scannerOptions != null && scannerOptions.hasKey("maxNumDocuments")) {
++            pageLimit = Math.max(1, scannerOptions.getInt("maxNumDocuments"));
++        }
++        // Hard-cap at 1 so multi-page add is never offered for this app.
++        pageLimit = 1;
+         GmsDocumentScannerOptions.Builder optionsBuilder = new GmsDocumentScannerOptions.Builder()
+                 .setGalleryImportAllowed(false)
+-                .setPageLimit(10)
+-                .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG, GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
++                .setPageLimit(pageLimit)
++                .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                 .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL);
+ 
+         GmsDocumentScannerOptions scannerOpts = optionsBuilder.build();
+diff --git a/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.h b/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.h
+index a5ec751..0fe241b 100644
+--- a/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.h
++++ b/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.h
+@@ -2,13 +2,14 @@
+ 
+ #import <React/RCTBridgeModule.h>
+ #import <CoreLocation/CoreLocation.h>
++#import <UIKit/UIKit.h>
+ 
+ #ifdef RCT_NEW_ARCH_ENABLED
+ #import <RNDocumentScannerSpec/RNDocumentScannerSpec.h>
+ 
+-@interface DocumentScanner : NativeDocumentScannerSpecBase <NativeDocumentScannerSpec, CLLocationManagerDelegate>
++@interface DocumentScanner : NativeDocumentScannerSpecBase <NativeDocumentScannerSpec, CLLocationManagerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+ #else
+-@interface DocumentScanner : NSObject <RCTBridgeModule, CLLocationManagerDelegate>
++@interface DocumentScanner : NSObject <RCTBridgeModule, CLLocationManagerDelegate, UIImagePickerControllerDelegate, UINavigationControllerDelegate>
+ #endif
+ 
+ @end
+diff --git a/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.mm b/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.mm
+index 02f6caf..1d14d2b 100644
+--- a/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.mm
++++ b/node_modules/@dariyd/react-native-document-scanner/ios/DocumentScanner.mm
+@@ -8,6 +8,8 @@
+ #import <CoreLocation/CoreLocation.h>
+ #import <MobileCoreServices/MobileCoreServices.h>
+ #import <UIKit/UIKit.h>
++#import <Vision/Vision.h>
++#import <CoreImage/CoreImage.h>
+ 
+ #ifdef RCT_NEW_ARCH_ENABLED
+ #import <RNDocumentScannerSpec/RNDocumentScannerSpec.h>
+@@ -97,9 +99,122 @@ - (void)launchDocScanner:(NSDictionary *)options callback:(RCTResponseSenderBloc
+ 
+ - (void)presentScanner
+ {
+-    VNDocumentCameraViewController *scanner = [[VNDocumentCameraViewController alloc] init];
+-    scanner.delegate = self;
+-    [RCTPresentedViewController() presentViewController:scanner animated:YES completion:nil];
++    // Always use single-photo capture. VNDocumentCameraViewController cannot be
++    // limited to one page and will keep auto-capturing (2, 3, … 6 of 6).
++    if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera]) {
++        if (self.callback) {
++            self.callback(@[@{
++                @"error": @YES,
++                @"errorMessage": @"Camera is not available on this device"
++            }]);
++            self.callback = nil;
++        }
++        return;
++    }
++
++    UIImagePickerController *picker = [[UIImagePickerController alloc] init];
++    picker.sourceType = UIImagePickerControllerSourceTypeCamera;
++    picker.cameraCaptureMode = UIImagePickerControllerCameraCaptureModePhoto;
++    picker.cameraDevice = UIImagePickerControllerCameraDeviceRear;
++    picker.allowsEditing = NO;
++    picker.delegate = self;
++    picker.modalPresentationStyle = UIModalPresentationFullScreen;
++    [RCTPresentedViewController() presentViewController:picker animated:YES completion:nil];
++}
++
++/** Flatten EXIF orientation so Vision crop coordinates match the pixels we see. */
++- (UIImage *)normalizedImage:(UIImage *)image
++{
++    if (!image || image.imageOrientation == UIImageOrientationUp) {
++        return image;
++    }
++    UIGraphicsBeginImageContextWithOptions(image.size, NO, image.scale);
++    [image drawInRect:CGRectMake(0, 0, image.size.width, image.size.height)];
++    UIImage *normalized = UIGraphicsGetImageFromCurrentImageContext();
++    UIGraphicsEndImageContext();
++    return normalized ?: image;
++}
++
++- (CIImage *)imageByCorrectingPerspective:(CIImage *)ciImage
++                              observation:(VNRectangleObservation *)observation
++{
++    CGSize size = ciImage.extent.size;
++    CGPoint topLeft = CGPointMake(observation.topLeft.x * size.width, observation.topLeft.y * size.height);
++    CGPoint topRight = CGPointMake(observation.topRight.x * size.width, observation.topRight.y * size.height);
++    CGPoint bottomLeft = CGPointMake(observation.bottomLeft.x * size.width, observation.bottomLeft.y * size.height);
++    CGPoint bottomRight = CGPointMake(observation.bottomRight.x * size.width, observation.bottomRight.y * size.height);
++
++    return [ciImage imageByApplyingFilter:@"CIPerspectiveCorrection"
++                      withInputParameters:@{
++                          @"inputTopLeft": [CIVector vectorWithCGPoint:topLeft],
++                          @"inputTopRight": [CIVector vectorWithCGPoint:topRight],
++                          @"inputBottomLeft": [CIVector vectorWithCGPoint:bottomLeft],
++                          @"inputBottomRight": [CIVector vectorWithCGPoint:bottomRight],
++                      }];
++}
++
++/**
++ * Crop + perspective-correct a single camera photo. Tries document
++ * segmentation first, then rectangle detection as a fallback.
++ */
++- (UIImage *)cropDocumentIfPossible:(UIImage *)image
++{
++    UIImage *normalized = [self normalizedImage:image];
++    if (!normalized || !normalized.CGImage) {
++        return image;
++    }
++
++    CIImage *ciImage = [[CIImage alloc] initWithCGImage:normalized.CGImage];
++    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:normalized.CGImage options:@{}];
++    VNRectangleObservation *bestObservation = nil;
++
++    if (@available(iOS 15.0, *)) {
++        VNDetectDocumentSegmentationRequest *docRequest = [[VNDetectDocumentSegmentationRequest alloc] init];
++        NSError *docError = nil;
++        if ([handler performRequests:@[docRequest] error:&docError]) {
++            id result = docRequest.results.firstObject;
++            if ([result isKindOfClass:[VNRectangleObservation class]]) {
++                bestObservation = (VNRectangleObservation *)result;
++            }
++        }
++    }
++
++    if (!bestObservation) {
++        VNDetectRectanglesRequest *rectRequest = [[VNDetectRectanglesRequest alloc] init];
++        rectRequest.maximumObservations = 1;
++        rectRequest.minimumConfidence = 0.6;
++        rectRequest.minimumAspectRatio = 0.3;
++        rectRequest.maximumAspectRatio = 1.0;
++        rectRequest.quadratureTolerance = 20.0;
++        NSError *rectError = nil;
++        // Need a fresh handler after a prior perform on some iOS versions.
++        VNImageRequestHandler *rectHandler =
++            [[VNImageRequestHandler alloc] initWithCGImage:normalized.CGImage options:@{}];
++        if ([rectHandler performRequests:@[rectRequest] error:&rectError]) {
++            id result = rectRequest.results.firstObject;
++            if ([result isKindOfClass:[VNRectangleObservation class]]) {
++                bestObservation = (VNRectangleObservation *)result;
++            }
++        }
++    }
++
++    if (!bestObservation) {
++        return normalized;
++    }
++
++    CIImage *corrected = [self imageByCorrectingPerspective:ciImage observation:bestObservation];
++    if (!corrected) {
++        return normalized;
++    }
++
++    CIContext *context = [CIContext contextWithOptions:nil];
++    CGImageRef cgImage = [context createCGImage:corrected fromRect:corrected.extent];
++    if (!cgImage) {
++        return normalized;
++    }
++    UIImage *cropped = [UIImage imageWithCGImage:cgImage scale:normalized.scale orientation:UIImageOrientationUp];
++    CGImageRelease(cgImage);
++    return cropped ?: normalized;
+ }
+ 
+ #pragma mark - Location
+@@ -406,14 +521,54 @@ - (void)imagePickerControllerDidCancel:(UIImagePickerController *)picker
+ {
+     dispatch_async(dispatch_get_main_queue(), ^{
+         [picker dismissViewControllerAnimated:YES completion:^{
+-            self.callback(@[@{ @"didCancel": @YES }]);
++            if (self.callback) {
++                self.callback(@[@{ @"didCancel": @YES }]);
++                self.callback = nil;
++            }
++        }];
++    });
++}
++
++- (void)imagePickerController:(UIImagePickerController *)picker didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *)info
++{
++    UIImage *image = info[UIImagePickerControllerOriginalImage];
++    if (!image) {
++        dispatch_async(dispatch_get_main_queue(), ^{
++            [picker dismissViewControllerAnimated:YES completion:^{
++                if (self.callback) {
++                    self.callback(@[@{
++                        @"error": @YES,
++                        @"errorMessage": @"No image was captured"
++                    }]);
++                    self.callback = nil;
++                }
++            }];
++        });
++        return;
++    }
++
++    UIImage *processed = [self cropDocumentIfPossible:image];
++    NSDictionary *asset = [self mapImageToAsset:processed];
++    dispatch_async(dispatch_get_main_queue(), ^{
++        [picker dismissViewControllerAnimated:YES completion:^{
++            if (self.callback) {
++                self.callback(@[@{ @"images": @[asset] }]);
++                self.callback = nil;
++            }
+         }];
+     });
+ }
+ 
+ - (void)documentCameraViewController:(VNDocumentCameraViewController *)controller didFinishWithScan:(VNDocumentCameraScan *)scan{
+     NSMutableArray *scannedImages = [NSMutableArray array];
+-    for (int i = 0; i < [scan pageCount]; i++) {
++    // Default to a single page so front/back stay separate app steps (matches Android).
++    // VisionKit has no page-limit API, so we only return the first captured page.
++    NSInteger maxPages = 1;
++    if (self.options[@"maxNumDocuments"] != nil) {
++        maxPages = MAX(1, [self.options[@"maxNumDocuments"] integerValue]);
++    }
++    NSInteger pageCount = MIN((NSInteger)[scan pageCount], maxPages);
++    for (int i = 0; i < pageCount; i++) {
+         UIImage *image =  [scan imageOfPageAtIndex:i];
+         [scannedImages addObject:[self mapImageToAsset:image]];
+     }
+diff --git a/node_modules/@dariyd/react-native-document-scanner/react-native-document-scanner.podspec b/node_modules/@dariyd/react-native-document-scanner/react-native-document-scanner.podspec
+index 96a9210..9069cf2 100644
+--- a/node_modules/@dariyd/react-native-document-scanner/react-native-document-scanner.podspec
++++ b/node_modules/@dariyd/react-native-document-scanner/react-native-document-scanner.podspec
+@@ -18,7 +18,7 @@ Pod::Spec.new do |s|
+   s.source_files = "ios/**/*.{h,c,cc,cpp,m,mm,swift}"
+   s.requires_arc = true
+   # Link VisionKit for VNDocumentCameraViewController
+-  s.frameworks   = ["VisionKit"]
++  s.frameworks   = ["VisionKit", "Vision", "CoreImage"]
+ 
+   # Use install_modules_dependencies helper for React Native 0.71+
+   if respond_to?(:install_modules_dependencies, true)

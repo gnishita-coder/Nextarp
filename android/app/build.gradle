@@ -110,6 +110,8 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    // Used by app-owned SinglePageScannerModule (pageLimit = 1).
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

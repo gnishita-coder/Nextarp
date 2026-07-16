@@ -1,7 +1,7 @@
 import React from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { colors, docTypeGradients } from '../theme';
+import { colors, docTypeGradients, elevationShadow } from '../theme';
 import type { DocumentType } from '../types';
 
 interface Props {
@@ -51,16 +51,7 @@ export function GradientIconTile({ documentType, size = 48 }: Props) {
 
 const styles = StyleSheet.create({
   shadowWrap: {
-    ...Platform.select({
-      ios: {
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
+    ...elevationShadow('tile'),
   },
   tile: {
     alignItems: 'center',

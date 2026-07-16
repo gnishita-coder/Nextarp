@@ -158,7 +158,7 @@ export function BackSideScreen({
           </View>
         ) : (
           <>
-            <Image source={{ uri: uri! }} style={styles.preview} resizeMode="cover" />
+            <Image source={{ uri: uri! }} style={styles.preview} resizeMode="contain" />
 
             {quality.analysisUnavailable && (
               <Text style={styles.analysisUnavailable}>
@@ -298,9 +298,10 @@ const styles = StyleSheet.create({
   },
   preview: {
     width: '100%',
-    aspectRatio: 16 / 10,
+    aspectRatio: 1.586,
     borderRadius: radius.xl,
     backgroundColor: colors.navy,
+    overflow: 'hidden',
   },
   analysisUnavailable: {
     fontSize: 12,
@@ -381,7 +382,8 @@ const styles = StyleSheet.create({
     minHeight: spacing.xl,
   },
   actions: {
-    marginTop: -20,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
   },
   retakeButton: {
     alignItems: 'center',

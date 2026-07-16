@@ -28,8 +28,8 @@
  *    contour detection just isn't in the same league as Apple's/Google's
  *    ML-based document detectors.
  *
- * 3. FINAL DECISION: capture now uses @dariyd/react-native-document-scanner's
- *    launchScanner() - Apple VisionKit on iOS, Google ML Kit on Android.
+ * 3. FINAL DECISION: capture uses app-owned SinglePageScanner (one photo +
+ *    auto-crop). Android: ML Kit with pageLimit=1. iOS: camera + Vision crop.
  *    This is an OS-native full-screen scanner modal (their UI, their colors,
  *    their own Auto/Manual capture control and Enhance/Filters/Crop-and-
  *    rotate review step) - NOT our custom-branded screen. The trade-off:
@@ -49,16 +49,15 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
+import { Alert, Platform, StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { launchScanner } from '@dariyd/react-native-document-scanner';
+import { launchSinglePageScanner } from './src/scanner';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { DocumentsScreen } from './src/screens/DocumentsScreen';
 import { DocumentDetailScreen } from './src/screens/DocumentDetailScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
-import { ScanningScreen } from './src/screens/ScanningScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
 import { BackSideScreen } from './src/screens/BackSideScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
@@ -102,10 +101,6 @@ const SKIPPED_NATIONALITY_CHECK: NationalityCheckResult = {
 
 type Flow =
   | { screen: 'home' }
-  // The transitional "opening scanner" screen is only shown for the front
-  // side - back-side capture happens in place on BackSideScreen (its own
-  // "Capture back side" button shows a loading spinner instead).
-  | { screen: 'scanning'; documentType: DocumentType }
   | {
       screen: 'review';
       documentType: DocumentType;
@@ -260,30 +255,44 @@ function App() {
    * then runs quality analysis + face-presence check (faceCheck.ts) +
    * nationality/country text check (nationalityCheck.ts) against the
    * currently selected nationality setting. Lands on the front Review
-   * screen, whose Next button moves on to BackSideScreen. */
+   * screen, whose Next button moves on to BackSideScreen.
+   *
+   * IMPORTANT (iOS): do NOT navigate to a loading screen before opening the
+   * camera. Presenting the native picker while a full-screen RN view has
+   * just replaced the Home tab can hang. Open the scanner in place from
+   * Home / Review instead. */
   const startFrontScan = useCallback(
-    async (documentType: DocumentType) => {
-      setFlow({ screen: 'scanning', documentType });
+    async (documentType: DocumentType, options?: { stayOnCancel?: boolean }) => {
       try {
-        const result = await launchScanner({ quality: 0.9 });
+        const result = await launchSinglePageScanner();
 
         if (result.didCancel) {
-          goHome();
+          if (!options?.stayOnCancel) {
+            goHome();
+          }
           return;
         }
-        if (result.error || !result.images || result.images.length === 0) {
+        if (result.error || !result.image) {
           Alert.alert(
             'Scanner error',
             result.errorMessage || 'The document scanner could not capture an image.',
             [
-              { text: 'Cancel', style: 'cancel', onPress: goHome },
-              { text: 'Try again', onPress: () => startFrontScan(documentType) },
+              {
+                text: 'Cancel',
+                style: 'cancel',
+                onPress: () => {
+                  if (!options?.stayOnCancel) {
+                    goHome();
+                  }
+                },
+              },
+              { text: 'Try again', onPress: () => startFrontScan(documentType, options) },
             ],
           );
           return;
         }
 
-        const image = result.images[0];
+        const image = result.image;
         const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
         const [quality, faceCheck, nationalityCheck] = await Promise.all([
           analyzeImageQuality(image.uri, image.width, image.height, documentType),
@@ -295,8 +304,16 @@ function App() {
       } catch (err) {
         console.warn('[NextarpSDK] launchScanner failed', err);
         Alert.alert('Scanner error', 'Something went wrong opening the scanner.', [
-          { text: 'Cancel', style: 'cancel', onPress: goHome },
-          { text: 'Try again', onPress: () => startFrontScan(documentType) },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => {
+              if (!options?.stayOnCancel) {
+                goHome();
+              }
+            },
+          },
+          { text: 'Try again', onPress: () => startFrontScan(documentType, options) },
         ]);
       }
     },
@@ -317,14 +334,17 @@ function App() {
       setDocumentTypePickerVisible(false);
       setSessionSides([]);
       setSessionFolderPath(undefined);
-      startFrontScan(documentType);
+      // VisionKit on iOS can silently fail to present if launchScanner is
+      // called while the document-type sheet is still animating its dismiss.
+      const delay = Platform.OS === 'ios' ? 450 : 200;
+      setTimeout(() => startFrontScan(documentType), delay);
     },
     [startFrontScan],
   );
 
   const handleRetakeFront = useCallback(
     (documentType: DocumentType) => {
-      startFrontScan(documentType);
+      startFrontScan(documentType, { stayOnCancel: true });
     },
     [startFrontScan],
   );
@@ -370,12 +390,12 @@ function App() {
   const handleCaptureBackSide = useCallback(async (documentType: DocumentType) => {
     setCapturingBack(true);
     try {
-      const result = await launchScanner({ quality: 0.9 });
+      const result = await launchSinglePageScanner();
 
       if (result.didCancel) {
         return;
       }
-      if (result.error || !result.images || result.images.length === 0) {
+      if (result.error || !result.image) {
         Alert.alert(
           'Scanner error',
           result.errorMessage || 'The document scanner could not capture an image.',
@@ -383,7 +403,7 @@ function App() {
         return;
       }
 
-      const image = result.images[0];
+      const image = result.image;
       const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
       const quality = await analyzeImageQuality(image.uri, image.width, image.height, documentType);
 
@@ -517,10 +537,6 @@ function App() {
             onSelect={handleSelectNationality}
             onClose={() => setNationalityPickerVisible(false)}
           />
-
-          {flow.screen === 'scanning' && (
-            <ScanningScreen documentType={flow.documentType} side="front" />
-          )}
 
           {flow.screen === 'review' && (
             <ReviewScreen
