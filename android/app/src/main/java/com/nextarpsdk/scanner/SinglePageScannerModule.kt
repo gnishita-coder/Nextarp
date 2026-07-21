@@ -9,6 +9,7 @@ import android.util.Log
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.BaseActivityEventListener
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -88,8 +89,18 @@ class SinglePageScannerModule(
   override fun getName(): String = NAME
 
   @ReactMethod
-  fun launch(promise: Promise) {
-    val activity = currentActivity
+  fun launch(
+    options: ReadableMap,
+    promise: Promise,
+  ) {
+    // ML Kit owns its capture controls, but keep the app's selected mode in
+    // the bridge contract so both platforms receive the same scan context.
+    val requestedMode =
+      if (options.hasKey("captureMode")) options.getString("captureMode") else "automatic"
+    val requestedSide = if (options.hasKey("side")) options.getString("side") else "front"
+    Log.d(NAME, "Opening $requestedSide scan ($requestedMode)")
+
+    val activity = reactApplicationContext.currentActivity
     if (activity == null) {
       promise.reject("NO_ACTIVITY", "Activity doesn't exist")
       return
@@ -134,7 +145,7 @@ class SinglePageScannerModule(
   }
 
   private fun copyToCache(imageUri: Uri): WritableNativeMap? {
-    val activity = currentActivity ?: return null
+    val activity = reactApplicationContext.currentActivity ?: return null
     val input = activity.contentResolver.openInputStream(imageUri) ?: return null
     val bytes = input.readBytes()
     input.close()

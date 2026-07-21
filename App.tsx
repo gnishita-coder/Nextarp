@@ -48,11 +48,20 @@
  * @format
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Platform, StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  BackHandler,
+  Platform,
+  StatusBar,
+  StyleSheet,
+  useColorScheme,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { launchSinglePageScanner } from './src/scanner';
+import { requestCameraPermission } from './src/permissions/cameraPermission';
 
 import { HomeScreen } from './src/screens/HomeScreen';
 import { DocumentsScreen } from './src/screens/DocumentsScreen';
@@ -61,10 +70,12 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
 import { BackSideScreen } from './src/screens/BackSideScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
+import { ScanningScreen } from './src/screens/ScanningScreen';
 import { DocumentTypeSheet } from './src/components/DocumentTypeSheet';
 import { NationalitySheet } from './src/components/NationalitySheet';
 import { BottomTabBar, type TabKey } from './src/components/BottomTabBar';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { LoadingOverlay } from './src/components/LoadingOverlay';
 import {
   deleteDocument,
   getSavedDocuments,
@@ -83,8 +94,13 @@ import type {
   Nationality,
   SavedDocument,
 } from './src/types';
+import { NATIONALITIES } from './src/types';
 
 const NATIONALITY_STORAGE_KEY = 'nextarp.nationality.v1';
+/** Fixed duration the "Preparing scanner" screen stays visible after nationality selection. */
+const SCANNER_PREPARATION_DURATION_MS = 4000;
+const allowLoadingOverlayToRender = () =>
+  new Promise<void>(resolve => setTimeout(resolve, 180));
 
 // The back side of a driving licence/passport never has a face photo (so
 // BackSideScreen doesn't run a face check at all - see its own comments) and,
@@ -126,9 +142,15 @@ type Flow =
       nationality?: Nationality;
     };
 
+type ReviewFlow = Extract<Flow, { screen: 'review' }>;
+
+type DocumentDetailOrigin = 'home' | 'documents';
+
 function App() {
   const isDarkMode = useColorScheme() === 'dark';
   const [documents, setDocuments] = useState<SavedDocument[]>([]);
+  const [documentsLoaded, setDocumentsLoaded] = useState(false);
+  const [operationLoading, setOperationLoading] = useState<string | null>(null);
   // Kept for the Home screen's Automatic/Manual tiles (matches the mockup),
   // but no longer changes capture behavior - the OS-native scanner has its
   // own built-in automatic-alignment + manual-shutter UX that we don't
@@ -136,15 +158,23 @@ function App() {
   const [captureMode, setCaptureMode] = useState<CaptureMode>('automatic');
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [flow, setFlow] = useState<Flow>({ screen: 'home' });
+  const [frontReviewFlow, setFrontReviewFlow] = useState<ReviewFlow | null>(null);
   const [saving, setSaving] = useState(false);
   // Loading state for BackSideScreen's "Capture back side" button - unlike
   // the front side, back-side capture doesn't navigate through the
   // transitional ScanningScreen, it just shows a spinner in place.
   const [capturingBack, setCapturingBack] = useState(false);
+  const [preparingScan, setPreparingScan] = useState<{
+    documentType: DocumentType;
+    side: 'front' | 'back';
+  } | null>(null);
   // Which document (if any) is open in the full front+back "PDF style"
   // viewer within the Documents tab. Cleared whenever the user leaves that
   // tab so switching tabs and back doesn't leave a stale detail view open.
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [documentDetailOrigin, setDocumentDetailOrigin] = useState<DocumentDetailOrigin | null>(
+    null,
+  );
 
   // App-wide nationality setting, chosen from the small flag icon in the
   // Home header (see NationalitySheet) rather than a mandatory full-screen
@@ -159,13 +189,22 @@ function App() {
   const [nationalityLoaded, setNationalityLoaded] = useState(false);
   const [nationalityPickerVisible, setNationalityPickerVisible] = useState(false);
   const [documentTypePickerVisible, setDocumentTypePickerVisible] = useState(false);
+  const [pendingDocumentType, setPendingDocumentType] = useState<DocumentType | null>(null);
+  const nationalityTransitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scannerPreparationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scannerLaunchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Accumulates sides + folder path across a single document's capture session.
   const [sessionSides, setSessionSides] = useState<CapturedSide[]>([]);
   const [sessionFolderPath, setSessionFolderPath] = useState<string | undefined>();
 
-  const refreshDocuments = useCallback(() => {
-    getSavedDocuments().then(setDocuments);
+  const refreshDocuments = useCallback(async () => {
+    try {
+      const savedDocuments = await getSavedDocuments();
+      setDocuments(savedDocuments);
+    } finally {
+      setDocumentsLoaded(true);
+    }
   }, []);
 
   const selectedDocument = documents.find(doc => doc.id === selectedDocumentId) ?? null;
@@ -175,64 +214,168 @@ function App() {
   }, [refreshDocuments]);
 
   useEffect(() => {
+    requestCameraPermission().catch(err => {
+      console.warn('[NextarpSDK] Camera permission request failed', err);
+    });
+  }, []);
+
+  useEffect(() => {
     AsyncStorage.getItem(NATIONALITY_STORAGE_KEY)
       .then(stored => {
-        if (stored === 'ES' || stored === 'TR') {
-          setNationality(stored);
+        if (NATIONALITIES.includes(stored as Nationality)) {
+          setNationality(stored as Nationality);
         }
       })
       .finally(() => setNationalityLoaded(true));
   }, []);
 
-  const handleSelectNationality = useCallback((next: Nationality) => {
+  const persistNationalitySelection = useCallback((next: Nationality) => {
     setNationality(next);
     AsyncStorage.setItem(NATIONALITY_STORAGE_KEY, next).catch(() => {
       /* non-critical - just means the choice won't be remembered next launch */
     });
   }, []);
 
-  const goHome = useCallback(() => {
-    setSessionSides([]);
-    setSessionFolderPath(undefined);
-    setActiveTab('home');
-    setFlow({ screen: 'home' });
+  const clearPendingScanTimers = useCallback(() => {
+    if (nationalityTransitionTimer.current) clearTimeout(nationalityTransitionTimer.current);
+    if (scannerPreparationTimer.current) clearTimeout(scannerPreparationTimer.current);
+    if (scannerLaunchTimer.current) clearTimeout(scannerLaunchTimer.current);
+    nationalityTransitionTimer.current = null;
+    scannerPreparationTimer.current = null;
+    scannerLaunchTimer.current = null;
   }, []);
 
-  /** Home row taps and "View all" both take the user to the Documents tab
-   * (list view, not a specific document's detail screen). */
+  useEffect(() => clearPendingScanTimers, [clearPendingScanTimers]);
+
+  const goHome = useCallback(() => {
+    clearPendingScanTimers();
+    setSessionSides([]);
+    setSessionFolderPath(undefined);
+    setFrontReviewFlow(null);
+    setPreparingScan(null);
+    setPendingDocumentType(null);
+    setDocumentTypePickerVisible(false);
+    setNationalityPickerVisible(false);
+    setOperationLoading(null);
+    setActiveTab('home');
+    setSelectedDocumentId(null);
+    setDocumentDetailOrigin(null);
+    setFlow({ screen: 'home' });
+  }, [clearPendingScanTimers]);
+
+  const handleCloseDocumentDetail = useCallback(() => {
+    setSelectedDocumentId(null);
+    setDocumentDetailOrigin(null);
+  }, []);
+
+  /** "View all" on Home - opens the Documents tab list (not a specific document). */
   const handleOpenDocumentsTab = useCallback(() => {
     setSelectedDocumentId(null);
+    setDocumentDetailOrigin(null);
     setActiveTab('documents');
   }, []);
 
-  /** Tapping a row inside the Documents tab opens that document's full
-   * front+back "PDF style" viewer. */
-  const handleOpenDocument = useCallback((id: string) => {
+  /** Recent-scan row on Home - opens the document detail viewer, back returns to Home. */
+  const handleOpenDocumentFromHome = useCallback((id: string) => {
+    setDocumentDetailOrigin('home');
     setSelectedDocumentId(id);
+    setActiveTab('home');
+  }, []);
+
+  /** Row tap in Documents tab - opens detail viewer, back returns to the list. */
+  const handleOpenDocument = useCallback((id: string) => {
+    setDocumentDetailOrigin('documents');
+    setSelectedDocumentId(id);
+    setActiveTab('documents');
   }, []);
 
   const handleChangeTab = useCallback((tab: TabKey) => {
-    if (tab !== 'documents') {
-      setSelectedDocumentId(null);
-    }
+    setSelectedDocumentId(null);
+    setDocumentDetailOrigin(null);
     setActiveTab(tab);
   }, []);
 
-  /** Deletes a document's storage record and on-disk photos. Used by the
-   * Home screen's swipe-to-delete - since Documents and Home both render
-   * from the same `documents` state, this removes it from both places. */
-  const handleDeleteDocument = useCallback(
-    async (id: string) => {
-      try {
-        await deleteDocument(id);
-        setSelectedDocumentId(current => (current === id ? null : current));
-        refreshDocuments();
-      } catch (err) {
-        console.warn('[NextarpSDK] Failed to delete document', err);
-        Alert.alert('Delete failed', 'This document could not be deleted. Please try again.');
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Flow screens own their back behavior so their local popups can close first.
+      if (flow.screen !== 'home') return false;
+
+      if (pendingDocumentType && operationLoading) {
+        clearPendingScanTimers();
+        setPendingDocumentType(null);
+        setOperationLoading(null);
+        return true;
       }
+      if (preparingScan) {
+        clearPendingScanTimers();
+        setPreparingScan(null);
+        return true;
+      }
+      if (operationLoading || saving || capturingBack) {
+        return true;
+      }
+      if (selectedDocumentId) {
+        handleCloseDocumentDetail();
+        return true;
+      }
+      if (activeTab !== 'home') {
+        setSelectedDocumentId(null);
+        setActiveTab('home');
+        return true;
+      }
+
+      // Returning false on the root Home screen lets Android close the app.
+      return false;
+    });
+    return () => subscription.remove();
+  }, [
+    activeTab,
+    capturingBack,
+    clearPendingScanTimers,
+    flow.screen,
+    operationLoading,
+    pendingDocumentType,
+    preparingScan,
+    saving,
+    selectedDocumentId,
+    handleCloseDocumentDetail,
+  ]);
+
+  /** Confirms destructive deletion before removing both metadata and photos. */
+  const handleDeleteDocument = useCallback(
+    (id: string) => {
+      const target = documents.find(document => document.id === id);
+      Alert.alert(
+        'Delete document?',
+        `Are you sure you want to delete “${target?.label ?? 'this document'}”? This removes both captured sides and cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              setOperationLoading('Deleting document…');
+              try {
+                await deleteDocument(id);
+                setSelectedDocumentId(current => {
+                  if (current === id) {
+                    setDocumentDetailOrigin(null);
+                  }
+                  return current === id ? null : current;
+                });
+                await refreshDocuments();
+              } catch (err) {
+                console.warn('[NextarpSDK] Failed to delete document', err);
+                Alert.alert('Delete failed', 'This document could not be deleted. Please try again.');
+              } finally {
+                setOperationLoading(null);
+              }
+            },
+          },
+        ],
+      );
     },
-    [refreshDocuments],
+    [documents, refreshDocuments],
   );
 
   /** Rename icon on DocumentDetailScreen - unlike the Success screen's naming
@@ -240,12 +383,15 @@ function App() {
    * navigating home. */
   const handleRenameDocument = useCallback(
     async (id: string, name: string) => {
+      setOperationLoading('Updating document…');
       try {
         await renameDocument(id, name);
-        refreshDocuments();
+        await refreshDocuments();
       } catch (err) {
         console.warn('[NextarpSDK] Failed to rename document', err);
         Alert.alert('Rename failed', 'This document could not be renamed. Please try again.');
+      } finally {
+        setOperationLoading(null);
       }
     },
     [refreshDocuments],
@@ -262,17 +408,28 @@ function App() {
    * just replaced the Home tab can hang. Open the scanner in place from
    * Home / Review instead. */
   const startFrontScan = useCallback(
-    async (documentType: DocumentType, options?: { stayOnCancel?: boolean }) => {
+    async (
+      documentType: DocumentType,
+      options?: { stayOnCancel?: boolean; nationality?: Nationality },
+    ) => {
       try {
-        const result = await launchSinglePageScanner();
+        setOperationLoading('Opening scanner…');
+        await allowLoadingOverlayToRender();
+        const result = await launchSinglePageScanner({
+          documentType,
+          side: 'front',
+          captureMode,
+        });
 
         if (result.didCancel) {
+          setOperationLoading(null);
           if (!options?.stayOnCancel) {
             goHome();
           }
           return;
         }
         if (result.error || !result.image) {
+          setOperationLoading(null);
           Alert.alert(
             'Scanner error',
             result.errorMessage || 'The document scanner could not capture an image.',
@@ -293,15 +450,30 @@ function App() {
         }
 
         const image = result.image;
+        setOperationLoading('Checking captured image…');
+        // Let the native scanner dismiss and paint the loading overlay before
+        // JPEG decoding and quality analysis perform CPU-heavy work.
+        await allowLoadingOverlayToRender();
         const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
         const [quality, faceCheck, nationalityCheck] = await Promise.all([
           analyzeImageQuality(image.uri, image.width, image.height, documentType),
           checkContainsFace(image.uri),
-          checkNationalityMatch(image.uri, nationality),
+          checkNationalityMatch(image.uri, options?.nationality ?? nationality),
         ]);
 
-        setFlow({ screen: 'review', documentType, photo, quality, faceCheck, nationalityCheck });
+        const reviewFlow: ReviewFlow = {
+          screen: 'review',
+          documentType,
+          photo,
+          quality,
+          faceCheck,
+          nationalityCheck,
+        };
+        setFrontReviewFlow(reviewFlow);
+        setFlow(reviewFlow);
+        setOperationLoading(null);
       } catch (err) {
+        setOperationLoading(null);
         console.warn('[NextarpSDK] launchScanner failed', err);
         Alert.alert('Scanner error', 'Something went wrong opening the scanner.', [
           {
@@ -317,7 +489,7 @@ function App() {
         ]);
       }
     },
-    [goHome, nationality],
+    [captureMode, goHome, nationality],
   );
 
   const openDocumentTypePicker = useCallback(() => {
@@ -334,12 +506,49 @@ function App() {
       setDocumentTypePickerVisible(false);
       setSessionSides([]);
       setSessionFolderPath(undefined);
-      // VisionKit on iOS can silently fail to present if launchScanner is
-      // called while the document-type sheet is still animating its dismiss.
-      const delay = Platform.OS === 'ios' ? 450 : 200;
-      setTimeout(() => startFrontScan(documentType), delay);
+      setFrontReviewFlow(null);
+      setPendingDocumentType(documentType);
+      setOperationLoading('Opening nationality selection…');
+      // Wait for the full-screen document picker to finish dismissing before
+      // presenting the nationality picker on top of the stable Home screen.
+      nationalityTransitionTimer.current = setTimeout(
+        () => {
+          nationalityTransitionTimer.current = null;
+          setOperationLoading(null);
+          setNationalityPickerVisible(true);
+        },
+        Platform.OS === 'ios' ? 350 : 150,
+      );
     },
-    [startFrontScan],
+    [],
+  );
+
+  const handleSelectNationality = useCallback(
+    (next: Nationality) => {
+      persistNationalitySelection(next);
+      setNationalityPickerVisible(false);
+      if (!pendingDocumentType) return;
+
+      const documentType = pendingDocumentType;
+      setPendingDocumentType(null);
+      setPreparingScan({ documentType, side: 'front' });
+      // Keep Home mounted underneath this lightweight preparation overlay.
+      // Show it for a fixed 4 s after nationality selection, then remove it
+      // before presenting the native scanner so iOS always presents from a
+      // stable React root after the nationality picker dismisses.
+      scannerPreparationTimer.current = setTimeout(() => {
+        scannerPreparationTimer.current = null;
+        setPreparingScan(null);
+        scannerLaunchTimer.current = setTimeout(
+          () => {
+            scannerLaunchTimer.current = null;
+            startFrontScan(documentType, { nationality: next });
+          },
+          Platform.OS === 'ios' ? 120 : 40,
+        );
+      }, SCANNER_PREPARATION_DURATION_MS);
+    },
+    [pendingDocumentType, persistNationalitySelection, startFrontScan],
   );
 
   const handleRetakeFront = useCallback(
@@ -354,6 +563,10 @@ function App() {
    * with no photo yet, prompting the user to capture the back). */
   const handleContinueToBackSide = useCallback(
     async (documentType: DocumentType, photo: CapturedPhoto) => {
+      if (sessionFolderPath && sessionSides.some(side => side.side === 'front')) {
+        setFlow({ screen: 'backSide', documentType });
+        return;
+      }
       setSaving(true);
       try {
         const { folderPath, side: savedSide } = await persistCapturedPhoto(
@@ -378,7 +591,7 @@ function App() {
         setSaving(false);
       }
     },
-    [],
+    [sessionFolderPath, sessionSides],
   );
 
   /** BackSideScreen's "Capture back side" / Retake button. Runs in place
@@ -390,7 +603,12 @@ function App() {
   const handleCaptureBackSide = useCallback(async (documentType: DocumentType) => {
     setCapturingBack(true);
     try {
-      const result = await launchSinglePageScanner();
+      await allowLoadingOverlayToRender();
+      const result = await launchSinglePageScanner({
+        documentType,
+        side: 'back',
+        captureMode,
+      });
 
       if (result.didCancel) {
         return;
@@ -404,6 +622,7 @@ function App() {
       }
 
       const image = result.image;
+      await allowLoadingOverlayToRender();
       const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
       const quality = await analyzeImageQuality(image.uri, image.width, image.height, documentType);
 
@@ -420,7 +639,7 @@ function App() {
     } finally {
       setCapturingBack(false);
     }
-  }, []);
+  }, [captureMode]);
 
   /** BackSideScreen's Save button - persists the back photo, writes the
    * combined front+back document record to storage, and moves to Success. */
@@ -477,11 +696,14 @@ function App() {
    * the Documents tab both read from the same saved `documents` state). */
   const handleSaveWithName = useCallback(
     async (documentId: string, name: string) => {
+      setOperationLoading('Saving document…');
       try {
         await renameDocument(documentId, name);
-        refreshDocuments();
+        await refreshDocuments();
       } catch (err) {
         console.warn('[NextarpSDK] Failed to rename document', err);
+      } finally {
+        setOperationLoading(null);
       }
       goHome();
     },
@@ -496,30 +718,48 @@ function App() {
           {flow.screen === 'home' && (
             <>
               <View style={styles.tabContent}>
-                {activeTab === 'home' && (
-                  <HomeScreen
-                    documents={documents}
-                    captureMode={captureMode}
-                    onChangeCaptureMode={setCaptureMode}
-                    onRequestScan={openDocumentTypePicker}
-                    onViewAllDocuments={handleOpenDocumentsTab}
-                    onDeleteDocument={handleDeleteDocument}
-                    nationality={nationality}
-                    onPressNationality={() => setNationalityPickerVisible(true)}
-                  />
-                )}
-                {activeTab === 'documents' &&
-                  (selectedDocument ? (
+                {activeTab === 'home' &&
+                  (selectedDocument && documentDetailOrigin === 'home' ? (
                     <DocumentDetailScreen
                       document={selectedDocument}
-                      onBack={() => setSelectedDocumentId(null)}
+                      onBack={handleCloseDocumentDetail}
                       onRename={name => handleRenameDocument(selectedDocument.id, name)}
                     />
                   ) : (
-                    <DocumentsScreen documents={documents} onOpenDocument={handleOpenDocument} />
+                    <HomeScreen
+                      documents={documents}
+                      captureMode={captureMode}
+                      onChangeCaptureMode={setCaptureMode}
+                      onRequestScan={openDocumentTypePicker}
+                      onViewAllDocuments={handleOpenDocumentsTab}
+                      onOpenDocument={handleOpenDocumentFromHome}
+                      onDeleteDocument={handleDeleteDocument}
+                      nationality={nationality}
+                      onPressNationality={() => setNationalityPickerVisible(true)}
+                    />
+                  ))}
+                {activeTab === 'documents' &&
+                  (selectedDocument && documentDetailOrigin === 'documents' ? (
+                    <DocumentDetailScreen
+                      document={selectedDocument}
+                      onBack={handleCloseDocumentDetail}
+                      onRename={name => handleRenameDocument(selectedDocument.id, name)}
+                    />
+                  ) : (
+                    <DocumentsScreen
+                      documents={documents}
+                      onOpenDocument={handleOpenDocument}
+                      onDeleteDocument={handleDeleteDocument}
+                    />
                   ))}
                 {activeTab === 'settings' && (
-                  <SettingsScreen documentCount={documents.length} onDataCleared={refreshDocuments} />
+                  <SettingsScreen
+                    documentCount={documents.length}
+                    onDataCleared={refreshDocuments}
+                    onLoadingChange={loading =>
+                      setOperationLoading(loading ? 'Clearing saved documents…' : null)
+                    }
+                  />
                 )}
               </View>
               <BottomTabBar active={activeTab} onChange={handleChangeTab} />
@@ -535,7 +775,16 @@ function App() {
             visible={nationalityPickerVisible}
             selected={nationality}
             onSelect={handleSelectNationality}
-            onClose={() => setNationalityPickerVisible(false)}
+            onClose={() => {
+              setNationalityPickerVisible(false);
+              if (pendingDocumentType) {
+                setPendingDocumentType(null);
+                nationalityTransitionTimer.current = setTimeout(() => {
+                  nationalityTransitionTimer.current = null;
+                  setDocumentTypePickerVisible(true);
+                }, Platform.OS === 'ios' ? 300 : 120);
+              }
+            }}
           />
 
           {flow.screen === 'review' && (
@@ -551,6 +800,10 @@ function App() {
               saving={saving}
               onBack={goHome}
               onRetake={() => handleRetakeFront(flow.documentType)}
+              onChangeCountry={() => {
+                goHome();
+                setTimeout(() => setNationalityPickerVisible(true), 100);
+              }}
               onNext={() => handleContinueToBackSide(flow.documentType, flow.photo)}
             />
           )}
@@ -564,7 +817,13 @@ function App() {
               nationalityCheck={flow.nationalityCheck}
               capturing={capturingBack}
               saving={saving}
-              onBack={goHome}
+              onBack={() => {
+                if (frontReviewFlow) {
+                  setFlow(frontReviewFlow);
+                } else {
+                  goHome();
+                }
+              }}
               onCapture={() => handleCaptureBackSide(flow.documentType)}
               onRetake={() => handleCaptureBackSide(flow.documentType)}
               onSave={() => handleSaveBackSide(flow.documentType, flow.photo!)}
@@ -574,7 +833,6 @@ function App() {
           {flow.screen === 'success' && (
             <SuccessScreen
               documentType={flow.documentType}
-              folderPath={flow.folderPath}
               sides={flow.sides}
               nationality={flow.nationality}
               onSaveWithName={name => handleSaveWithName(flow.documentId, name)}
@@ -582,8 +840,52 @@ function App() {
                 goHome();
                 openDocumentTypePicker();
               }}
+              onOpenDocument={() => {
+                const documentId = flow.documentId;
+                goHome();
+                setDocumentDetailOrigin('documents');
+                setSelectedDocumentId(documentId);
+                setActiveTab('documents');
+              }}
+              onDone={goHome}
             />
           )}
+
+          {preparingScan && (
+            <View style={styles.preparingOverlay}>
+              <ScanningScreen
+                documentType={preparingScan.documentType}
+                side={preparingScan.side}
+              />
+            </View>
+          )}
+
+          <LoadingOverlay
+            visible={
+              !documentsLoaded ||
+              !nationalityLoaded ||
+              operationLoading != null ||
+              saving ||
+              capturingBack
+            }
+            title={
+              !documentsLoaded || !nationalityLoaded
+                ? 'Loading your vault'
+                : operationLoading
+                  ? 'Please wait'
+                  : capturingBack
+                    ? 'Processing scan'
+                    : 'Saving document'
+            }
+            message={
+              operationLoading ??
+              (capturingBack
+                ? 'Checking the captured image…'
+                : saving
+                  ? 'Securing your document on this device…'
+                  : 'Loading your saved documents and preferences…')
+            }
+          />
         </ErrorBoundary>
       </View>
     </SafeAreaProvider>
@@ -596,6 +898,10 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     flex: 1,
+  },
+  preparingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 100,
   },
 });
 

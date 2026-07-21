@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { AppBackButton } from '../components/AppBackButton';
 import { colors, radius, spacing } from '../theme';
 import { formatFileSize } from '../storage';
 import type { QualityReport } from '../quality/imageQuality';
@@ -32,6 +33,7 @@ interface Props {
   saving?: boolean;
   onBack: () => void;
   onRetake: () => void;
+  onChangeCountry?: () => void;
   /** Front side never saves the document on its own - it always moves on to
    * the back-side capture screen. */
   onNext: () => void;
@@ -57,6 +59,7 @@ export function ReviewScreen({
   saving,
   onBack,
   onRetake,
+  onChangeCountry,
   onNext,
 }: Props) {
   const [fileSizeBytes, setFileSizeBytes] = useState<number | null>(null);
@@ -95,26 +98,48 @@ export function ReviewScreen({
 
   // The popup appears whenever ANY check below is red - not just face or
   // nationality - so a blurry/glary/low-res/misaligned shot surfaces the
-  // same "something's off, retake or continue" prompt.
+  // same verification screen with the exact failed checks.
   const issueAlert = useMemo(() => {
     if (overallPass) return null;
-    if (noFaceDetected) {
-      return {
-        title: 'No ID photo detected',
-        body: "We couldn't find a face in this scan. Retake for a clearer shot, or continue if this is correct.",
-      };
-    }
+
+    const reasons: string[] = [];
     if (nationalityMismatch && nationality) {
-      return {
-        title: `Doesn't match ${NATIONALITY_LABELS[nationality]}`,
-        body: `This document doesn't appear to match ${NATIONALITY_LABELS[nationality]}. Check the nationality or retake the photo.`,
-      };
+      reasons.push(`Document does not match ${NATIONALITY_LABELS[nationality]}`);
     }
+    if (noFaceDetected) reasons.push('No ID photo or face was detected');
+    if (quality.isBlurry) reasons.push('Image is blurry or out of focus');
+    if (quality.hasGlare) reasons.push('Glare or overexposure was detected');
+    if (!quality.resolutionOk) reasons.push('Image resolution is too low');
+    if (!quality.aspectRatioOk) reasons.push('Document is cropped, rotated, or misaligned');
+    if (reasons.length === 0) {
+      reasons.push(...quality.warnings);
+    }
+    if (reasons.length === 0) reasons.push('Verification could not be completed');
+
+    const onlyNationalityFailed =
+      nationalityMismatch &&
+      !noFaceDetected &&
+      quality.overallPass;
+    const onlyFaceFailed =
+      noFaceDetected &&
+      !nationalityMismatch &&
+      quality.overallPass;
+
     return {
-      title: 'This scan needs another look',
-      body: "This photo didn't pass every quality check. Retake for a clearer shot, or continue if this is correct.",
+      title: onlyNationalityFailed
+        ? 'Country could not be verified'
+        : onlyFaceFailed
+          ? 'ID photo not detected'
+          : 'Unable to verify document',
+      body: onlyNationalityFailed && nationality
+        ? `We couldn't confirm that this document matches the selected country (${NATIONALITY_LABELS[nationality]}).`
+        : onlyFaceFailed
+          ? "We couldn't detect an ID photo or face in the captured document."
+          : 'The captured image did not pass all required verification checks.',
+      reasons,
+      showChangeCountry: nationalityMismatch,
     };
-  }, [overallPass, noFaceDetected, nationalityMismatch, nationality]);
+  }, [overallPass, noFaceDetected, nationalityMismatch, nationality, quality]);
 
   useEffect(() => {
     setIssueAlertVisible(issueAlert != null);
@@ -135,20 +160,28 @@ export function ReviewScreen({
 
   const docLabel = DOCUMENT_LABELS[documentType];
   const uri = photoPath.startsWith('file://') ? photoPath : `file://${photoPath}`;
+  const handleRetakeFromVerification = () => {
+    setIssueAlertVisible(false);
+    // The verification UI is a native full-screen Modal. Give it time to
+    // dismiss so the app-level loading overlay is visible before reopening
+    // the native scanner.
+    setTimeout(onRetake, 140);
+  };
 
-  const checks: { label: string; pass: boolean }[] = [
-    { label: 'Sharpness', pass: !quality.isBlurry },
-    { label: 'No glare / overexposure', pass: !quality.hasGlare },
-    { label: 'Resolution', pass: quality.resolutionOk },
-    { label: 'Aspect ratio / orientation', pass: quality.aspectRatioOk },
+  const checks: { label: string; pass: boolean; status: string }[] = [
+    { label: 'Sharpness', pass: !quality.isBlurry, status: 'Excellent' },
+    { label: 'No glare / overexposure', pass: !quality.hasGlare, status: 'Good' },
+    { label: 'Resolution', pass: quality.resolutionOk, status: 'Excellent' },
+    { label: 'Aspect ratio / orientation', pass: quality.aspectRatioOk, status: 'Correct' },
   ];
   if (faceCheck.checkAvailable) {
-    checks.push({ label: 'ID photo detected', pass: faceCheck.hasFace });
+    checks.push({ label: 'ID photo detected', pass: faceCheck.hasFace, status: 'Yes' });
   }
   if (nationalityCheck.checkAvailable && nationality) {
     checks.push({
       label: `Matches ${NATIONALITY_LABELS[nationality]}`,
       pass: nationalityCheck.matchesSelected,
+      status: 'Yes',
     });
   }
 
@@ -160,21 +193,18 @@ export function ReviewScreen({
         keyboardShouldPersistTaps="handled"
         bounces>
         <View style={styles.header}>
-          <TouchableOpacity
+          <AppBackButton
             style={styles.backButton}
             onPress={onBack}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel="Back to home">
-            <Text style={styles.backGlyph}>{'‹'}</Text>
-          </TouchableOpacity>
+            accessibilityLabel="Back to home"
+          />
           <Text style={styles.title}>Review scan</Text>
-          <Text style={styles.subtitle}>
-            Front side · {docLabel}
-          </Text>
+          <Text style={styles.subtitle}>Front side · {docLabel}</Text>
         </View>
 
-        <Image source={{ uri }} style={styles.preview} resizeMode="contain" />
+        <View style={styles.previewCard}>
+          <Image source={{ uri }} style={styles.preview} resizeMode="cover" />
+        </View>
 
         {quality.analysisUnavailable && (
           <Text style={styles.analysisUnavailable}>
@@ -184,6 +214,14 @@ export function ReviewScreen({
         )}
 
         <View style={styles.checksCard}>
+          <View style={styles.checksHeader}>
+            <Text style={styles.sectionTitle}>Image quality</Text>
+            <View style={[styles.overallPill, !overallPass && styles.statusPillFail]}>
+              <Text style={[styles.overallText, !overallPass && styles.statusTextFail]}>
+                {overallPass ? 'Excellent' : 'Check'}
+              </Text>
+            </View>
+          </View>
           {checks.map((check, index) => (
             <View
               key={check.label}
@@ -194,21 +232,20 @@ export function ReviewScreen({
               <Text style={[styles.qualityLabel, !check.pass && styles.qualityLabelFail]} numberOfLines={1}>
                 {check.label}
               </Text>
+              <Text style={[styles.statusText, !check.pass && styles.statusTextFail]}>
+                {check.pass ? check.status : 'Check'}
+              </Text>
             </View>
           ))}
         </View>
 
         <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>
-              {fileSizeBytes != null ? formatFileSize(fileSizeBytes) : '—'}
-            </Text>
+          <View style={styles.statBlock}>
+            <Text style={styles.statValue}>{fileSizeBytes != null ? formatFileSize(fileSizeBytes) : '—'}</Text>
             <Text style={styles.statLabel}>File size</Text>
           </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statValue}>
-              {photoWidth}×{photoHeight}
-            </Text>
+          <View style={styles.statBlock}>
+            <Text style={styles.statValue}>{photoWidth} × {photoHeight}</Text>
             <Text style={styles.statLabel}>Resolution</Text>
           </View>
         </View>
@@ -237,38 +274,49 @@ export function ReviewScreen({
 
       <Modal
         visible={issueAlertVisible && issueAlert != null}
-        transparent
         animationType="fade"
+        presentationStyle="fullScreen"
         onRequestClose={() => setIssueAlertVisible(false)}>
-        <View style={styles.alertBackdrop}>
-          <TouchableOpacity
-            style={styles.alertBackdropTouchable}
-            activeOpacity={1}
-            onPress={() => setIssueAlertVisible(false)}
-          />
-          <View style={styles.alertCard}>
-            <View style={styles.alertIconWrap}>
-              <Text style={styles.alertIcon}>{'!'}</Text>
+        <SafeAreaView style={styles.verifyScreen}>
+          <View style={styles.verifyContent}>
+            <View style={styles.verifyIcon}>
+              <Text style={styles.verifyIconText}>!</Text>
             </View>
-            <Text style={styles.alertTitle}>{issueAlert?.title}</Text>
-            <Text style={styles.alertBody}>{issueAlert?.body}</Text>
+
+            <Text style={styles.verifyTitle}>{issueAlert?.title}</Text>
+            <Text style={styles.verifyBody}>{issueAlert?.body}</Text>
+
+            <View style={styles.reasons}>
+              <Text style={styles.reasonsTitle}>Possible reasons</Text>
+              {issueAlert?.reasons.map(reason => (
+                <Text key={reason} style={styles.reasonItem}>•  {reason}</Text>
+              ))}
+            </View>
+
+            <PrimaryButton
+              label="Retake photo"
+              onPress={handleRetakeFromVerification}
+              loading={saving}
+              style={styles.verifyPrimaryButton}
+            />
+            {issueAlert?.showChangeCountry && (
+              <TouchableOpacity
+                style={styles.verifySecondaryButton}
+                onPress={onChangeCountry ?? (() => setIssueAlertVisible(false))}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Change country">
+                <Text style={styles.verifySecondaryLabel}>Change country</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
-              style={[styles.alertRetakeButton, saving && styles.retakeButtonDisabled]}
-              onPress={onRetake}
-              disabled={saving}
-              activeOpacity={0.7}>
-              <Text style={styles.retakeLabel}>Retake photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.alertCloseButton}
+              style={styles.verifyCancelButton}
               onPress={() => setIssueAlertVisible(false)}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="Close">
-              <Text style={styles.alertCloseLabel}>Close</Text>
+              activeOpacity={0.7}>
+              <Text style={styles.verifyCancelLabel}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </SafeAreaView>
       </Modal>
     </SafeAreaView>
   );
@@ -281,69 +329,90 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: 18,
+    paddingBottom: 12,
   },
   header: {
     alignItems: 'center',
-    marginTop: spacing.md,
-    marginBottom: spacing.lg,
+    justifyContent: 'center',
+    height: 68,
+    marginBottom: 7,
   },
   backButton: {
     position: 'absolute',
     left: 0,
-    top: 0,
-    width: 48,
-    height: 48,
-    borderRadius: 18,
-    backgroundColor: colors.cardWhite,
-    alignItems: 'center',
-    justifyContent: 'center',
+    top: 13,
     zIndex: 1,
-    marginTop: 6,
-  },
-  backGlyph: {
-    color: colors.navy,
-    fontSize: 42,
-    fontWeight: '600',
-    lineHeight: 38,
-    marginTop: -8,
   },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     color: colors.navy,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.muted,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: 3,
+  },
+  previewCard: {
+    borderRadius: 15,
+    backgroundColor: colors.cardWhite,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   preview: {
     width: '100%',
-    aspectRatio: 1.586,
-    borderRadius: radius.xl,
+    aspectRatio: 1.72,
+    borderRadius: 12,
     backgroundColor: colors.navy,
     overflow: 'hidden',
   },
   analysisUnavailable: {
-    fontSize: 12,
+    fontSize: 9,
     color: colors.muted,
     textAlign: 'center',
     marginTop: spacing.sm,
   },
   checksCard: {
-    marginTop: spacing.md,
     backgroundColor: colors.cardWhite,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  checksHeader: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  sectionTitle: {
+    flex: 1,
+    color: colors.navy,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  overallPill: {
+    borderRadius: radius.pill,
+    backgroundColor: colors.successSoft,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
+  },
+  overallText: {
+    color: colors.success,
+    fontSize: 12,
+    fontWeight: '800',
   },
   qualityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm + 2,
+    minHeight: 42,
+    paddingVertical: 9,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -351,9 +420,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   qualityDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    marginRight: 10,
     alignItems: 'center',
     justifyContent: 'center',
     flexShrink: 0,
@@ -366,7 +436,7 @@ const styles = StyleSheet.create({
   },
   qualityCheck: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '700',
   },
   qualityLabel: {
@@ -379,106 +449,135 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontWeight: '700',
   },
-  alertBackdrop: {
+  statusPillFail: {
+    backgroundColor: colors.dangerSoft,
+  },
+  statusText: {
+    color: colors.success,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  statusTextFail: {
+    color: colors.danger,
+  },
+  verifyScreen: {
     flex: 1,
-    backgroundColor: 'rgba(15, 12, 30, 0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.background,
   },
-  alertBackdropTouchable: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  alertCard: {
-    width: '100%',
-    backgroundColor: colors.cardWhite,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+  verifyContent: {
+    flex: 1,
+    paddingHorizontal: 30,
+    paddingTop: 44,
     alignItems: 'center',
   },
-  alertIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  verifyIcon: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: colors.danger,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
+    marginBottom: 24,
   },
-  alertIcon: {
+  verifyIconText: {
     color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 32,
+    lineHeight: 35,
+    fontWeight: '800',
   },
-  alertTitle: {
-    color: colors.danger,
-    fontWeight: '700',
-    fontSize: 17,
+  verifyTitle: {
+    color: colors.navy,
+    fontWeight: '800',
+    fontSize: 20,
     textAlign: 'center',
-    marginBottom: spacing.sm,
+    marginBottom: 12,
   },
-  alertBody: {
+  verifyBody: {
+    color: colors.navySubtle,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    maxWidth: 310,
+  },
+  reasons: {
+    alignSelf: 'stretch',
+    marginTop: 36,
+    marginHorizontal: 20,
+  },
+  reasonsTitle: {
+    color: colors.navy,
+    fontWeight: '800',
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  reasonItem: {
+    color: colors.navySubtle,
+    fontSize: 13,
+    lineHeight: 25,
+  },
+  verifyPrimaryButton: {
+    marginTop: 38,
+    borderRadius: radius.pill,
+  },
+  verifySecondaryButton: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    marginTop: 12,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.purpleDeep,
+    backgroundColor: 'transparent',
+  },
+  verifySecondaryLabel: {
+    color: colors.navy,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  verifyCancelButton: {
+    marginTop: 15,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.xl,
+  },
+  verifyCancelLabel: {
     color: colors.navySubtle,
     fontSize: 14,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginBottom: spacing.lg,
-  },
-  alertRetakeButton: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
-    borderRadius: radius.pill,
-    borderWidth: 1.5,
-    borderColor: colors.navy,
-    backgroundColor: colors.cardWhite,
-  },
-  alertCloseButton: {
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
-    borderRadius: radius.pill,
-    borderWidth: 1.5,
-    borderColor: colors.navy,
-    backgroundColor: colors.cardWhite,
-  },
-  alertCloseLabel: {
-    color: colors.navy,
-    fontWeight: '700',
-    fontSize: 15,
+    fontWeight: '500',
   },
   statsRow: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.cardWhite,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
     alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+  },
+  statBlock: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 60,
+    borderRadius: 10,
+    backgroundColor: colors.cardWhite,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   statValue: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
     color: colors.purple,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
   },
   spacer: {
     flex: 1,
-    minHeight: spacing.xl,
+    minHeight: 10,
   },
   actions: {
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
+    marginTop: 8,
+    marginBottom: 0,
   },
   retakeButton: {
     alignItems: 'center',

@@ -28,6 +28,10 @@ export interface NationalityCheckResult {
 const COUNTRY_MARKERS: Record<Nationality, string[]> = {
   ES: ['ESP', 'SPAIN', 'ESPAÑA', 'ESPANA', 'REINO DE ESPAÑA', 'REINO DE ESPANA', 'ESPANOLA'],
   TR: ['TUR', 'TURKEY', 'TÜRKİYE', 'TURKIYE', 'T.C.', 'REPUBLIC OF TURKEY', 'TURKIYE CUMHURIYETI'],
+  FR: ['FRA', 'FRANCE', 'RÉPUBLIQUE FRANÇAISE', 'REPUBLIQUE FRANCAISE'],
+  DE: ['DEU', 'GERMANY', 'DEUTSCHLAND', 'BUNDESREPUBLIK DEUTSCHLAND'],
+  IT: ['ITA', 'ITALY', 'ITALIA', 'REPUBBLICA ITALIANA'],
+  NL: ['NLD', 'NETHERLANDS', 'NEDERLAND', 'KONINKRIJK DER NEDERLANDEN'],
 };
 
 export async function checkNationalityMatch(

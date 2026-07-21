@@ -13,6 +13,8 @@
 
 @interface LiveDocumentCameraViewController : UIViewController <AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate>
 @property (nonatomic, copy) void (^onFinished)(UIImage *_Nullable image, BOOL cancelled);
+@property (nonatomic, copy) NSString *documentSide;
+@property (nonatomic, copy) NSString *documentType;
 @end
 
 @implementation LiveDocumentCameraViewController {
@@ -25,7 +27,6 @@
   // Always-visible crop UI (does not wait for Vision).
   UIView *_overlayContainer;
   CAShapeLayer *_dimLayer;
-  CAShapeLayer *_frameLayer;
   CAShapeLayer *_cornerLayer;
   CAShapeLayer *_detectedLayer;
   CAShapeLayer *_detectedFill;
@@ -104,18 +105,11 @@
   _dimLayer.fillColor = [[UIColor colorWithWhite:0 alpha:0.55] CGColor];
   [_overlayContainer.layer addSublayer:_dimLayer];
 
-  // Solid frame around the cut-out.
-  _frameLayer = [CAShapeLayer layer];
-  _frameLayer.fillColor = nil;
-  _frameLayer.strokeColor = [[UIColor whiteColor] CGColor];
-  _frameLayer.lineWidth = 2.0;
-  [_overlayContainer.layer addSublayer:_frameLayer];
-
-  // Thick corner brackets (classic document-scanner look).
+  // Corner brackets only — no full border (viewfinder look).
   _cornerLayer = [CAShapeLayer layer];
   _cornerLayer.fillColor = nil;
-  _cornerLayer.strokeColor = [[UIColor colorWithRed:0.42 green:0.31 blue:0.88 alpha:1] CGColor];
-  _cornerLayer.lineWidth = 5.0;
+  _cornerLayer.strokeColor = [[UIColor whiteColor] CGColor];
+  _cornerLayer.lineWidth = 4.0;
   _cornerLayer.lineCap = kCALineCapRound;
   _cornerLayer.lineJoin = kCALineJoinRound;
   [_overlayContainer.layer addSublayer:_cornerLayer];
@@ -133,7 +127,11 @@
   [_overlayContainer.layer addSublayer:_detectedLayer];
 
   _titleLabel = [[UILabel alloc] init];
-  _titleLabel.text = @"Scan document";
+  BOOL isBack = [self.documentSide isEqualToString:@"back"];
+  NSString *documentLabel = [self.documentType isEqualToString:@"passport"]
+    ? @"passport"
+    : @"driving licence";
+  _titleLabel.text = isBack ? @"Back side" : @"Front side";
   _titleLabel.textColor = [UIColor whiteColor];
   _titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
   _titleLabel.textAlignment = NSTextAlignmentCenter;
@@ -141,7 +139,7 @@
   [self.view addSubview:_titleLabel];
 
   _hintLabel = [[UILabel alloc] init];
-  _hintLabel.text = @"Fit the ID inside the purple corners";
+  _hintLabel.text = [NSString stringWithFormat:@"Position the %@ within the frame", documentLabel];
   _hintLabel.textColor = [[UIColor whiteColor] colorWithAlphaComponent:0.9];
   _hintLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
   _hintLabel.textAlignment = NSTextAlignmentCenter;
@@ -225,15 +223,11 @@
   _dimLayer.path = dimPath.CGPath;
   _dimLayer.frame = bounds;
 
-  UIBezierPath *framePath = [UIBezierPath bezierPathWithRoundedRect:_guideRect cornerRadius:8];
-  _frameLayer.path = framePath.CGPath;
-  _frameLayer.frame = bounds;
-
-  _cornerLayer.path = [self cornerBracketsPathInRect:_guideRect length:28].CGPath;
+  _cornerLayer.path = [self cornerBracketsPathInRect:_guideRect length:32 cornerRadius:10].CGPath;
   _cornerLayer.frame = bounds;
 }
 
-- (UIBezierPath *)cornerBracketsPathInRect:(CGRect)rect length:(CGFloat)length
+- (UIBezierPath *)cornerBracketsPathInRect:(CGRect)rect length:(CGFloat)length cornerRadius:(CGFloat)radius
 {
   UIBezierPath *path = [UIBezierPath bezierPath];
   CGFloat minX = CGRectGetMinX(rect);
@@ -241,22 +235,46 @@
   CGFloat maxX = CGRectGetMaxX(rect);
   CGFloat maxY = CGRectGetMaxY(rect);
 
-  // Top-left
+  // Top-left — rounded outer corner
   [path moveToPoint:CGPointMake(minX, minY + length)];
-  [path addLineToPoint:CGPointMake(minX, minY)];
+  [path addLineToPoint:CGPointMake(minX, minY + radius)];
+  [path addArcWithCenter:CGPointMake(minX + radius, minY + radius)
+                  radius:radius
+              startAngle:(CGFloat)M_PI
+                endAngle:(CGFloat)(3.0 * M_PI / 2.0)
+               clockwise:YES];
   [path addLineToPoint:CGPointMake(minX + length, minY)];
+
   // Top-right
   [path moveToPoint:CGPointMake(maxX - length, minY)];
-  [path addLineToPoint:CGPointMake(maxX, minY)];
+  [path addLineToPoint:CGPointMake(maxX - radius, minY)];
+  [path addArcWithCenter:CGPointMake(maxX - radius, minY + radius)
+                  radius:radius
+              startAngle:(CGFloat)(3.0 * M_PI / 2.0)
+                endAngle:0
+               clockwise:YES];
   [path addLineToPoint:CGPointMake(maxX, minY + length)];
+
   // Bottom-right
   [path moveToPoint:CGPointMake(maxX, maxY - length)];
-  [path addLineToPoint:CGPointMake(maxX, maxY)];
+  [path addLineToPoint:CGPointMake(maxX, maxY - radius)];
+  [path addArcWithCenter:CGPointMake(maxX - radius, maxY - radius)
+                  radius:radius
+              startAngle:0
+                endAngle:(CGFloat)(M_PI / 2.0)
+               clockwise:YES];
   [path addLineToPoint:CGPointMake(maxX - length, maxY)];
+
   // Bottom-left
   [path moveToPoint:CGPointMake(minX + length, maxY)];
-  [path addLineToPoint:CGPointMake(minX, maxY)];
+  [path addLineToPoint:CGPointMake(minX + radius, maxY)];
+  [path addArcWithCenter:CGPointMake(minX + radius, maxY - radius)
+                  radius:radius
+              startAngle:(CGFloat)(M_PI / 2.0)
+                endAngle:(CGFloat)M_PI
+               clockwise:YES];
   [path addLineToPoint:CGPointMake(minX, maxY - length)];
+
   return path;
 }
 
@@ -528,8 +546,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
   if (!observation) {
     _detectedLayer.path = nil;
     _detectedFill.path = nil;
-    _hintLabel.text = @"Fit the ID inside the purple corners";
-    _cornerLayer.strokeColor = [[UIColor colorWithRed:0.42 green:0.31 blue:0.88 alpha:1] CGColor];
+    _hintLabel.text = @"Fit the ID inside the frame";
+    _cornerLayer.strokeColor = [[UIColor whiteColor] CGColor];
     return;
   }
 
@@ -552,7 +570,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
   [CATransaction commit];
 
   _cornerLayer.strokeColor = [[UIColor colorWithRed:0.35 green:0.9 blue:0.45 alpha:1] CGColor];
-  _hintLabel.text = @"Document detected — tap shutter";
+  _hintLabel.text = @"Document detected — tap to capture";
 }
 
 #pragma mark - Photo
@@ -743,7 +761,34 @@ RCT_EXPORT_MODULE();
   return NO;
 }
 
-RCT_EXPORT_METHOD(launch:(RCTPromiseResolveBlock)resolve
+RCT_EXPORT_METHOD(requestCameraPermission:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+    if (status == AVAuthorizationStatusAuthorized) {
+      resolve(@{ @"granted": @YES, @"status": @"granted" });
+      return;
+    }
+    if (status == AVAuthorizationStatusDenied || status == AVAuthorizationStatusRestricted) {
+      resolve(@{ @"granted": @NO, @"status": @"denied" });
+      return;
+    }
+
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
+                             completionHandler:^(BOOL granted) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        resolve(@{
+          @"granted": @(granted),
+          @"status": granted ? @"granted" : @"denied",
+        });
+      });
+    }];
+  });
+}
+
+RCT_EXPORT_METHOD(launch:(NSDictionary *)options
+                  resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -764,6 +809,12 @@ RCT_EXPORT_METHOD(launch:(RCTPromiseResolveBlock)resolve
 
       LiveDocumentCameraViewController *camera = [[LiveDocumentCameraViewController alloc] init];
       camera.modalPresentationStyle = UIModalPresentationFullScreen;
+      camera.documentSide = [options[@"side"] isKindOfClass:[NSString class]]
+        ? options[@"side"]
+        : @"front";
+      camera.documentType = [options[@"documentType"] isKindOfClass:[NSString class]]
+        ? options[@"documentType"]
+        : @"driving_licence";
       __weak SinglePageScanner *weakSelf = self;
       camera.onFinished = ^(UIImage *_Nullable image, BOOL cancelled) {
         SinglePageScanner *strongSelf = weakSelf;

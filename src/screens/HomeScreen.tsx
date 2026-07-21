@@ -2,6 +2,7 @@ import React from 'react';
 import {
   FlatList,
   Image,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -9,10 +10,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
+import { Ionicons } from '@react-native-vector-icons/ionicons/static';
 import { GradientIconTile } from '../components/GradientIconTile';
-import { FrameCornersIcon, TapIcon } from '../components/ModeIcons';
+import { FrameCornersIcon } from '../components/ModeIcons';
 import { SwipeableRow } from '../components/SwipeableRow';
-import { colors, elevationShadow, heroModeColors, primaryGradient, radius, spacing } from '../theme';
+import { colors, primaryGradient, radius, spacing } from '../theme';
 import { formatRelativeTimestamp } from '../storage';
 import type { CaptureMode, Nationality, SavedDocument } from '../types';
 import { NATIONALITY_FLAGS, NATIONALITY_CODES } from '../types';
@@ -23,8 +25,10 @@ interface Props {
   onChangeCaptureMode: (mode: CaptureMode) => void;
   /** Called when the user taps Automatic or Manual - should open the document-type picker. */
   onRequestScan: () => void;
-  /** Called for "View all" and for tapping any row - both take the user to the Documents tab. */
+  /** Called for "View all" - takes the user to the Documents tab list. */
   onViewAllDocuments: () => void;
+  /** Called when a recent-scan row is tapped - opens that document's detail viewer. */
+  onOpenDocument: (id: string) => void;
   /** Called when a row is swiped left and its Delete button is tapped. */
   onDeleteDocument: (id: string) => void;
   /** Currently selected nationality (small header icon) and handler to open its picker sheet. */
@@ -35,9 +39,9 @@ interface Props {
 export function HomeScreen({
   documents,
   captureMode,
-  onChangeCaptureMode,
   onRequestScan,
   onViewAllDocuments,
+  onOpenDocument,
   onDeleteDocument,
   nationality,
   onPressNationality,
@@ -46,7 +50,7 @@ export function HomeScreen({
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>ID vault</Text>
+          <Text style={styles.title}>ID Vault</Text>
           <Text style={styles.subtitle}>
             {documents.length} document{documents.length === 1 ? '' : 's'} saved
           </Text>
@@ -58,6 +62,7 @@ export function HomeScreen({
             activeOpacity={0.8}>
             <Text style={styles.nationalityFlag}>{NATIONALITY_FLAGS[nationality]}</Text>
             <Text style={styles.nationalityCode}>{NATIONALITY_CODES[nationality]}</Text>
+            <Text style={styles.nationalityChevron}>⌄</Text>
           </TouchableOpacity>
           <View style={styles.avatarShadowWrap}>
             <LinearGradient
@@ -75,84 +80,41 @@ export function HomeScreen({
 
       <View style={styles.heroCard}>
         <LinearGradient
-          colors={primaryGradient.colors}
-          start={primaryGradient.start}
-          end={primaryGradient.end}
+          colors={['#5635D3', '#6741D6', '#B65D9B']}
+          start={{ x: 0.85, y: 0 }}
+          end={{ x: 0.1, y: 1 }}
           style={StyleSheet.absoluteFillObject}
         />
-        <View style={styles.heroBlob} pointerEvents="none" />
+        <View style={styles.heroGlow} pointerEvents="none" />
 
-        <View style={styles.heroIconWrap}>
-          <GradientIconTile documentType="driving_licence" size={56} />
+        <View style={styles.heroIcon}>
+          <FrameCornersIcon color="#FFFFFF" size={27} />
+          <View style={styles.heroIconDocument}>
+            <View style={styles.heroIconDot} />
+          </View>
         </View>
         <Text style={styles.heroTitle}>Scan a new document</Text>
         <Text style={styles.heroSubtitle}>Driving licence or passport</Text>
 
-        <View style={styles.modeRow}>
-          <TouchableOpacity
-            style={[
-              styles.modeButton,
-              captureMode === 'automatic' ? styles.modeButtonActive : styles.modeButtonInactive,
-            ]}
-            activeOpacity={0.85}
-            onPress={() => {
-              onChangeCaptureMode('automatic');
-              onRequestScan();
-            }}
-          >
-            <View
-              style={[
-                styles.modeIconBubble,
-                captureMode === 'automatic'
-                  ? styles.modeIconBubbleActive
-                  : styles.modeIconBubbleInactive,
-              ]}
-            >
-              {captureMode === 'automatic' && <View style={styles.modeIconGloss} />}
-              <FrameCornersIcon
-                color={captureMode === 'automatic' ? colors.purpleDeep : '#FFFFFF'}
-                size={18}
-              />
+        <TouchableOpacity
+          style={styles.scanButton}
+          activeOpacity={0.88}
+          onPress={onRequestScan}
+          accessibilityRole="button"
+          accessibilityLabel="Start scan"
+          accessibilityHint="Opens the document type picker">
+          <View style={styles.scanButtonIcon}>
+            <FrameCornersIcon color={colors.purpleDeep} size={20} />
+            <View style={styles.scanButtonIconDocument}>
+              <View style={styles.scanButtonIconDot} />
             </View>
-            <Text
-              style={[
-                styles.modeLabel,
-                captureMode === 'automatic' ? styles.modeLabelActive : styles.modeLabelInactive,
-              ]}
-            >
-              Automatic
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.modeButton,
-              captureMode === 'manual' ? styles.modeButtonActive : styles.modeButtonInactive,
-            ]}
-            activeOpacity={0.85}
-            onPress={() => {
-              onChangeCaptureMode('manual');
-              onRequestScan();
-            }}
-          >
-            <View
-              style={[
-                styles.modeIconBubble,
-                captureMode === 'manual' ? styles.modeIconBubbleActive : styles.modeIconBubbleInactive,
-              ]}
-            >
-              {captureMode === 'manual' && <View style={styles.modeIconGloss} />}
-              <TapIcon color={captureMode === 'manual' ? colors.purpleDeep : '#FFFFFF'} size={18} />
-            </View>
-            <Text
-              style={[
-                styles.modeLabel,
-                captureMode === 'manual' ? styles.modeLabelActive : styles.modeLabelInactive,
-              ]}
-            >
-              Manual
-            </Text>
-          </TouchableOpacity>
-        </View>
+          </View>
+          <Text style={styles.scanButtonLabel}>Start Scan</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.selectedMode}>
+          {captureMode === 'automatic' ? 'Automatic mode (recommended)' : 'Manual mode'}
+        </Text>
       </View>
 
       <View style={styles.listHeader}>
@@ -165,12 +127,15 @@ export function HomeScreen({
       </View>
 
       <FlatList
-        data={documents.slice(0, 5)}
+        data={documents.slice(0, 10)}
         keyExtractor={item => item.id}
+        style={styles.list}
         contentContainerStyle={styles.listContent}
+        scrollEnabled
+        showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <Text style={styles.emptyText}>
-            No scans yet. Tap "Scan a new document" to capture your first ID.
+            No scans yet. Tap Start Scan to capture your first ID.
           </Text>
         }
         renderItem={({ item }) => (
@@ -178,9 +143,9 @@ export function HomeScreen({
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.7}
-              onPress={onViewAllDocuments}
+              onPress={() => onOpenDocument(item.id)}
               accessibilityRole="button"
-              accessibilityLabel={`Open ${item.label} in Documents`}>
+              accessibilityLabel={`Open ${item.label}`}>
               {item.sides[0]?.uri ? (
                 <Image source={{ uri: item.sides[0].uri }} style={styles.thumbnail} resizeMode="cover" />
               ) : (
@@ -192,10 +157,12 @@ export function HomeScreen({
                   {item.nationality ? ` ${NATIONALITY_FLAGS[item.nationality]}` : ''}
                 </Text>
                 <Text style={styles.rowTimestamp}>
-                  {formatRelativeTimestamp(item.createdAt)}
+                  {formatRelativeTimestamp(item.createdAt)} · {item.sides.length} sides
                 </Text>
               </View>
-              <Text style={styles.chevron}>{'>'}</Text>
+              <View style={styles.chevron}>
+                <Ionicons name="chevron-forward" color={colors.muted} size={18} />
+              </View>
             </TouchableOpacity>
           </SwipeableRow>
         )}
@@ -208,55 +175,68 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: 17,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginTop: spacing.md,
+    alignItems: 'center',
+    marginTop: 9,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '800',
     color: colors.navy,
   },
   subtitle: {
-    fontSize: 15,
+    fontSize: 13,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 1,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: 10,
   },
   nationalityButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
     backgroundColor: colors.cardWhite,
     borderRadius: radius.pill,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
+    height: 30,
+    paddingHorizontal: 9,
     borderWidth: 1,
     borderColor: colors.border,
   },
   nationalityFlag: {
-    fontSize: 18,
+    fontSize: 14,
   },
   nationalityCode: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.navy,
   },
+  nationalityChevron: {
+    color: colors.muted,
+    fontSize: 11,
+    marginTop: -2,
+  },
   avatarShadowWrap: {
-    ...elevationShadow('avatar'),
+    ...Platform.select({
+      ios: {
+        shadowColor: colors.purple,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.22,
+        shadowRadius: 5,
+      },
+      android: { elevation: 4 },
+    }),
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -272,108 +252,142 @@ const styles = StyleSheet.create({
   },
   avatarLabel: {
     color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 16,
+    fontWeight: '800',
+    fontSize: 10,
   },
   heroCard: {
-    marginTop: spacing.lg,
-    borderRadius: radius.xl,
-    padding: spacing.lg,
+    height: 300,
+    marginTop: 20,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingTop: 22,
+    paddingBottom: 17,
     overflow: 'hidden',
     position: 'relative',
   },
-  heroBlob: {
+  heroGlow: {
     position: 'absolute',
-    top: -50,
-    right: -40,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    top: -55,
+    right: -52,
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  heroIconWrap: {
-    marginBottom: spacing.md,
+  heroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroIconDocument: {
+    position: 'absolute',
+    width: 11,
+    height: 8,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    borderRadius: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroIconDot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: '#FFFFFF',
   },
   heroTitle: {
     color: '#FFFFFF',
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 21,
+    fontWeight: '800',
+    marginTop: 13,
   },
   heroSubtitle: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 14,
     marginTop: 2,
-    marginBottom: spacing.md,
   },
-  modeRow: {
+  scanButton: {
+    height: 78,
+    borderRadius: 11,
+    backgroundColor: colors.cardWhite,
     flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  modeButton: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    alignItems: 'center',
-    gap: 6,
-  },
-  modeButtonActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  modeButtonInactive: {
-    backgroundColor: heroModeColors.buttonInactive,
-    borderWidth: 1,
-    borderColor: heroModeColors.buttonInactiveBorder,
-  },
-  modeIconBubble: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
+    marginTop: 15,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+    ...Platform.select({
+      ios: {
+        shadowColor: colors.navy,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      },
+      android: { elevation: 3 },
+    }),
   },
-  modeIconBubbleActive: heroModeColors.iconBubbleActive,
-  modeIconBubbleInactive: {
-    backgroundColor: heroModeColors.iconBubbleInactive,
-  },
-  modeIconGloss: {
-    position: 'absolute',
-    top: -8,
-    left: -6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-  },
-  modeLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  modeLabelActive: {
+  scanButtonLabel: {
     color: colors.purpleDeep,
+    fontSize: 20,
+    fontWeight: '800',
   },
-  modeLabelInactive: {
-    color: '#FFFFFF',
+  scanButtonIcon: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanButtonIconDocument: {
+    position: 'absolute',
+    width: 9,
+    height: 7,
+    borderWidth: 1.5,
+    borderColor: colors.purpleDeep,
+    borderRadius: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.cardWhite,
+  },
+  scanButtonIconDot: {
+    width: 2.5,
+    height: 2.5,
+    borderRadius: 2,
+    backgroundColor: colors.purpleDeep,
+  },
+  selectedMode: {
+    color: 'rgba(255,255,255,0.9)',
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '500',
+    marginTop: 20,
   },
   listHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+    marginTop: 14,
+    marginBottom: 9,
   },
   listTitle: {
-    fontSize: 19,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
     color: colors.navy,
   },
   viewAll: {
     color: colors.purple,
     fontWeight: '600',
-    fontSize: 14,
+    fontSize: 13,
   },
   listContent: {
-    paddingBottom: 96,
+    paddingBottom: 18,
+  },
+  list: {
+    flex: 1,
   },
   emptyText: {
     color: colors.muted,
@@ -382,37 +396,42 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   swipeWrap: {
-    marginBottom: spacing.sm,
+    marginBottom: 10,
+    borderRadius: 16,
+    backgroundColor: colors.cardWhite,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.cardWhite,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.md,
+    height: 78,
+    borderRadius: 0,
+    paddingHorizontal: 10,
+    gap: 11,
   },
   thumbnail: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.sm,
+    width: 60,
+    height: 60,
+    borderRadius: 7,
     backgroundColor: colors.border,
   },
   rowText: {
     flex: 1,
   },
   rowTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.navy,
   },
   rowTimestamp: {
-    fontSize: 13,
+    fontSize: 12,
     color: colors.muted,
     marginTop: 2,
   },
   chevron: {
-    color: colors.mutedLight,
-    fontSize: 18,
+    width: 24,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

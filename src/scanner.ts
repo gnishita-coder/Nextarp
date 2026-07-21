@@ -1,4 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
+import type { CaptureMode, DocumentSide, DocumentType } from './types';
 
 export type CapturedScanImage = {
   uri: string;
@@ -18,10 +19,16 @@ export type SinglePageScanResult = {
 };
 
 type SinglePageScannerNative = {
-  launch: () => Promise<{
+  launch: (options: SinglePageScannerOptions) => Promise<{
     didCancel?: boolean;
     image?: CapturedScanImage;
   }>;
+};
+
+export type SinglePageScannerOptions = {
+  documentType: DocumentType;
+  side: DocumentSide;
+  captureMode: CaptureMode;
 };
 
 const NativeSinglePageScanner = NativeModules.SinglePageScanner as
@@ -33,7 +40,9 @@ const NativeSinglePageScanner = NativeModules.SinglePageScanner as
  * - Android: ML Kit Document Scanner with pageLimit = 1 (live edges + crop)
  * - iOS: custom camera with Vision live rectangle overlay + crop on shutter
  */
-export async function launchSinglePageScanner(): Promise<SinglePageScanResult> {
+export async function launchSinglePageScanner(
+  options: SinglePageScannerOptions,
+): Promise<SinglePageScanResult> {
   if (!NativeSinglePageScanner?.launch) {
     return {
       error: true,
@@ -44,7 +53,7 @@ export async function launchSinglePageScanner(): Promise<SinglePageScanResult> {
   }
 
   try {
-    const result = await NativeSinglePageScanner.launch();
+    const result = await NativeSinglePageScanner.launch(options);
     if (result.didCancel) {
       return { didCancel: true };
     }

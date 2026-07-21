@@ -51,7 +51,7 @@ export function PrimaryButton({ label, onPress, disabled, loading, style }: Prop
 
 const styles = StyleSheet.create({
   touchable: {
-    borderRadius: radius.pill,
+    borderRadius: radius.md,
     overflow: 'hidden',
     alignSelf: 'stretch',
   },
@@ -60,19 +60,19 @@ const styles = StyleSheet.create({
   },
   gradient: {
     width: '100%',
-    minHeight: 56,
-    borderRadius: radius.pill,
+    minHeight: 50,
+    borderRadius: radius.md,
   },
   content: {
-    minHeight: 56,
-    paddingVertical: 16,
+    minHeight: 50,
+    paddingVertical: 14,
     paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
   label: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

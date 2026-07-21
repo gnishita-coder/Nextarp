@@ -1,7 +1,10 @@
 import React from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@react-native-vector-icons/ionicons/static';
 import { GradientIconTile } from './GradientIconTile';
-import { colors, radius, spacing } from '../theme';
+import { colors, elevationShadow, radius, spacing } from '../theme';
+import { AppBackButton } from './AppBackButton';
 import type { DocumentType } from '../types';
 import { DOCUMENT_LABELS } from '../types';
 
@@ -12,7 +15,11 @@ interface Props {
 }
 
 // Client scope for this build: Driving Licence and Passport only.
-const SELECTABLE_TYPES: DocumentType[] = ['driving_licence', 'passport'];
+const SELECTABLE_TYPES = ['driving_licence', 'passport'] as const satisfies readonly DocumentType[];
+const TYPE_DESCRIPTIONS: Record<(typeof SELECTABLE_TYPES)[number], string> = {
+  driving_licence: 'Government-issued driving licence',
+  passport: 'International passport',
+};
 
 /**
  * Document-type picker shown after the user taps Automatic/Manual on the
@@ -20,100 +27,124 @@ const SELECTABLE_TYPES: DocumentType[] = ['driving_licence', 'passport'];
  */
 export function DocumentTypeSheet({ visible, onSelect, onClose }: Props) {
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.backdropTouchable} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.grabber} />
-          <Text style={styles.title}>Select document type</Text>
-          <Text style={styles.subtitle}>Choose the ID you want to scan</Text>
-
-          {SELECTABLE_TYPES.map(type => (
-            <TouchableOpacity
-              key={type}
-              style={styles.option}
-              activeOpacity={0.8}
-              onPress={() => onSelect(type)}
-            >
-              <GradientIconTile documentType={type} size={44} />
-              <Text style={styles.optionLabel}>{DOCUMENT_LABELS[type]}</Text>
-              <Text style={styles.chevron}>{'>'}</Text>
-            </TouchableOpacity>
-          ))}
-
-          <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-            <Text style={styles.cancelLabel}>Cancel</Text>
-          </TouchableOpacity>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}>
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.header}>
+          <AppBackButton onPress={onClose} accessibilityLabel="Back" />
         </View>
-      </View>
+
+        <View style={styles.content}>
+          <Text style={styles.title}>Select document type</Text>
+          <Text style={styles.subtitle}>What are you scanning?</Text>
+
+          <View style={styles.options}>
+            {SELECTABLE_TYPES.map(type => (
+              <TouchableOpacity
+                key={type}
+                style={styles.option}
+                activeOpacity={0.82}
+                onPress={() => onSelect(type)}
+                accessibilityRole="button"
+                accessibilityLabel={DOCUMENT_LABELS[type]}
+                accessibilityHint={TYPE_DESCRIPTIONS[type]}>
+                <GradientIconTile documentType={type} size={54} />
+                <View style={styles.optionCopy}>
+                  <Text style={styles.optionLabel}>{DOCUMENT_LABELS[type]}</Text>
+                  <Text style={styles.optionDescription}>{TYPE_DESCRIPTIONS[type]}</Text>
+                </View>
+                <Ionicons name="chevron-forward" color={colors.muted} size={20} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.cancelButton}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel document selection">
+          <Text style={styles.cancelLabel}>Cancel</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
+  screen: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(15, 12, 30, 0.45)',
+    backgroundColor: colors.background,
   },
-  backdropTouchable: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  sheet: {
-    backgroundColor: colors.cardWhite,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+  header: {
+    height: 56,
+    justifyContent: 'center',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xl,
   },
-  grabber: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.md,
+  content: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
   },
   title: {
-    fontSize: 19,
-    fontWeight: '700',
+    fontSize: 25,
+    fontWeight: '800',
     color: colors.navy,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 14,
     color: colors.muted,
     textAlign: 'center',
-    marginTop: 2,
-    marginBottom: spacing.md,
+    marginTop: spacing.sm,
+  },
+  options: {
+    marginTop: spacing.xxl,
+    gap: spacing.md,
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    minHeight: 104,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.cardWhite,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...elevationShadow('tile'),
+  },
+  optionCopy: {
+    flex: 1,
   },
   optionLabel: {
-    flex: 1,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.navy,
   },
-  chevron: {
-    color: colors.mutedLight,
-    fontSize: 18,
+  optionDescription: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.muted,
+    marginTop: spacing.xs,
   },
   cancelButton: {
-    marginTop: spacing.md,
+    marginHorizontal: 32,
+    marginBottom: 40,
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    justifyContent: 'center',
+    minHeight: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.cardWhite,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   cancelLabel: {
-    color: colors.muted,
-    fontWeight: '600',
+    color: colors.navySubtle,
+    fontWeight: '700',
     fontSize: 15,
   },
 });

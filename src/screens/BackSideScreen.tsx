@@ -11,6 +11,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { AppBackButton } from '../components/AppBackButton';
+import { StepProgress } from '../components/StepProgress';
 import { colors, radius, spacing } from '../theme';
 import { formatFileSize } from '../storage';
 import type { QualityReport } from '../quality/imageQuality';
@@ -99,12 +101,12 @@ export function BackSideScreen({
     return () => subscription.remove();
   }, [onBack]);
 
-  const checks: { label: string; pass: boolean }[] = hasPhoto
+  const checks: { label: string; pass: boolean; status: string }[] = hasPhoto
     ? [
-        { label: 'Sharpness', pass: !quality.isBlurry },
-        { label: 'No glare / overexposure', pass: !quality.hasGlare },
-        { label: 'Resolution', pass: quality.resolutionOk },
-        { label: 'Aspect ratio / orientation', pass: quality.aspectRatioOk },
+        { label: 'Sharpness', pass: !quality.isBlurry, status: 'Excellent' },
+        { label: 'No glare / overexposure', pass: !quality.hasGlare, status: 'Good' },
+        { label: 'Resolution', pass: quality.resolutionOk, status: 'Excellent' },
+        { label: 'Aspect ratio / orientation', pass: quality.aspectRatioOk, status: 'Correct' },
       ]
     : [];
 
@@ -112,6 +114,7 @@ export function BackSideScreen({
     checks.push({
       label: `Matches ${NATIONALITY_LABELS[nationality]}`,
       pass: nationalityCheck.matchesSelected,
+      status: 'Yes',
     });
   }
 
@@ -130,35 +133,45 @@ export function BackSideScreen({
         keyboardShouldPersistTaps="handled"
         bounces>
         <View style={styles.header}>
-          <TouchableOpacity
+          <AppBackButton
             style={styles.backButton}
             onPress={onBack}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel="Back to home">
-            <Text style={styles.backGlyph}>{'‹'}</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>{hasPhoto ? 'Review scan' : 'Back side'}</Text>
-          <Text style={styles.subtitle}>Back side · {docLabel}</Text>
+            accessibilityLabel="Go to previous screen"
+          />
+          <Text style={styles.title}>{hasPhoto ? 'Review scan' : 'Capture back side'}</Text>
+          <Text style={styles.subtitle}>
+            {hasPhoto ? `Back side · ${docLabel}` : 'Step 2 of 2'}
+          </Text>
         </View>
 
         {!hasPhoto ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Capture the back side</Text>
+          <>
+            <StepProgress currentStep={2} labels={['Front', 'Back']} />
+            <View style={styles.emptyCopy}>
+              <Text style={styles.emptyTitle}>Capture the back side</Text>
             <Text style={styles.emptyBody}>
-              Flip your {docLabel.toLowerCase()} and scan the reverse side to finish this
-              document.
+                Flip your {docLabel.toLowerCase()} over and place it inside the frame.
             </Text>
-            <PrimaryButton
-              label="Capture back side"
-              onPress={onCapture}
-              loading={capturing}
-              style={styles.captureButton}
-            />
-          </View>
+            </View>
+            <View style={styles.placeholderCard}>
+              <View style={styles.placeholderPhoto} />
+              <View style={styles.placeholderLines}>
+                <View style={styles.placeholderLine} />
+                <View style={styles.placeholderLineShort} />
+                <View style={styles.placeholderLine} />
+              </View>
+              <View style={styles.scanCorners}>
+                <Text style={styles.scanGlyph}>⌗</Text>
+              </View>
+            </View>
+            <Text style={styles.hint}>Keep all four corners visible and avoid glare</Text>
+          </>
         ) : (
           <>
-            <Image source={{ uri: uri! }} style={styles.preview} resizeMode="contain" />
+            <View style={styles.previewCard}>
+              <Image source={{ uri: uri! }} style={styles.preview} resizeMode="contain" />
+              <View style={styles.sideBadge}><Text style={styles.sideBadgeText}>BACK SIDE</Text></View>
+            </View>
 
             {quality.analysisUnavailable && (
               <Text style={styles.analysisUnavailable}>
@@ -167,38 +180,33 @@ export function BackSideScreen({
               </Text>
             )}
 
+            <Text style={styles.sectionTitle}>Image quality</Text>
             <View style={styles.checksCard}>
               {checks.map((check, index) => (
                 <View
                   key={check.label}
                   style={[styles.qualityRow, index === checks.length - 1 && styles.qualityRowLast]}>
-                  <View
-                    style={[
-                      styles.qualityDot,
-                      check.pass ? styles.qualityDotPass : styles.qualityDotFail,
-                    ]}>
-                    <Text style={styles.qualityCheck}>{check.pass ? '✓' : '!'}</Text>
-                  </View>
                   <Text
                     style={[styles.qualityLabel, !check.pass && styles.qualityLabelFail]}
                     numberOfLines={1}>
                     {check.label}
                   </Text>
+                  <View style={[styles.statusPill, !check.pass && styles.statusPillFail]}>
+                    <Text style={[styles.statusText, !check.pass && styles.statusTextFail]}>
+                      {check.pass ? check.status : 'Check'}
+                    </Text>
+                  </View>
                 </View>
               ))}
             </View>
 
             <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>
-                  {fileSizeBytes != null ? formatFileSize(fileSizeBytes) : '—'}
-                </Text>
+              <View style={styles.statBlock}>
+                <Text style={styles.statValue}>{fileSizeBytes != null ? formatFileSize(fileSizeBytes) : '—'}</Text>
                 <Text style={styles.statLabel}>File size</Text>
               </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statValue}>
-                  {photo.width}×{photo.height}
-                </Text>
+              <View style={styles.statBlock}>
+                <Text style={styles.statValue}>{photo.width} × {photo.height}</Text>
                 <Text style={styles.statLabel}>Resolution</Text>
               </View>
             </View>
@@ -207,7 +215,16 @@ export function BackSideScreen({
 
         <View style={styles.spacer} />
 
-        {hasPhoto && (
+        {!hasPhoto ? (
+          <View style={styles.actions}>
+            <PrimaryButton
+              label="Capture back side"
+              onPress={onCapture}
+              loading={capturing}
+              style={styles.captureButton}
+            />
+          </View>
+        ) : (
           <View style={styles.actions}>
             {overallPass ? (
               <PrimaryButton label="Save to folder" onPress={onSave} loading={saving} />
@@ -244,22 +261,8 @@ const styles = StyleSheet.create({
   backButton: {
     position: 'absolute',
     left: 0,
-    top: 0,
-    width: 48,
-    height: 48,
-    borderRadius: 18,
-    backgroundColor: colors.cardWhite,
-    alignItems: 'center',
-    justifyContent: 'center',
+    top: 6,
     zIndex: 1,
-    marginTop: 6,
-  },
-  backGlyph: {
-    color: colors.navy,
-    fontSize: 42,
-    fontWeight: '600',
-    lineHeight: 38,
-    marginTop: -8,
   },
   title: {
     fontSize: 22,
@@ -273,15 +276,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 4,
   },
-  emptyCard: {
-    backgroundColor: colors.cardWhite,
-    borderRadius: radius.lg,
-    padding: spacing.lg,
+  emptyCopy: {
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.xl,
     alignItems: 'center',
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '800',
     color: colors.navy,
     textAlign: 'center',
   },
@@ -290,18 +292,95 @@ const styles = StyleSheet.create({
     color: colors.muted,
     textAlign: 'center',
     marginTop: spacing.sm,
-    marginBottom: spacing.lg,
     lineHeight: 20,
+  },
+  placeholderCard: {
+    width: '100%',
+    aspectRatio: 1.586,
+    marginTop: spacing.xl,
+    borderRadius: radius.xl,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderColor: '#CFC8EA',
+    backgroundColor: colors.purpleSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.xl,
+  },
+  placeholderPhoto: {
+    width: 70,
+    height: 82,
+    borderRadius: radius.md,
+    backgroundColor: '#DDD6F5',
+  },
+  placeholderLines: {
+    flex: 1,
+    marginLeft: spacing.lg,
+    gap: spacing.md,
+  },
+  placeholderLine: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#D5CEEE',
+  },
+  placeholderLineShort: {
+    width: '65%',
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#D5CEEE',
+  },
+  scanCorners: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: spacing.md,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.cardWhite,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanGlyph: {
+    color: colors.purple,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  hint: {
+    marginTop: spacing.md,
+    color: colors.muted,
+    fontSize: 12,
+    textAlign: 'center',
   },
   captureButton: {
     alignSelf: 'stretch',
   },
+  previewCard: {
+    borderRadius: radius.xl,
+    backgroundColor: colors.cardWhite,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   preview: {
     width: '100%',
     aspectRatio: 1.586,
-    borderRadius: radius.xl,
+    borderRadius: radius.lg,
     backgroundColor: colors.navy,
     overflow: 'hidden',
+  },
+  sideBadge: {
+    position: 'absolute',
+    left: spacing.md,
+    bottom: spacing.md,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(33,28,62,0.82)',
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 5,
+  },
+  sideBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   analysisUnavailable: {
     fontSize: 12,
@@ -310,16 +389,23 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   checksCard: {
-    marginTop: spacing.md,
     backgroundColor: colors.cardWhite,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sectionTitle: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+    color: colors.navy,
+    fontSize: 16,
+    fontWeight: '800',
   },
   qualityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.sm + 2,
+    paddingVertical: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -355,27 +441,50 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontWeight: '700',
   },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.cardWhite,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
+  statusPill: {
+    minWidth: 70,
+    borderRadius: radius.pill,
+    backgroundColor: colors.successSoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
     alignItems: 'center',
   },
+  statusPillFail: {
+    backgroundColor: colors.dangerSoft,
+  },
+  statusText: {
+    color: colors.success,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  statusTextFail: {
+    color: colors.danger,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+  },
+  statBlock: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 60,
+    borderRadius: 10,
+    backgroundColor: colors.cardWhite,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   statValue: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
     color: colors.purple,
   },
   statLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: colors.muted,
-    marginTop: 2,
+    marginTop: 3,
   },
   spacer: {
     flex: 1,

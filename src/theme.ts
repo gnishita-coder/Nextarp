@@ -6,32 +6,36 @@
 import { Platform, type ViewStyle } from 'react-native';
 
 export const colors = {
-  background: '#F4F2FB',
-  backgroundSoft: '#F8F6FD',
+  background: '#F8F7FC',
+  backgroundSoft: '#F3F1FA',
   cardWhite: '#FFFFFF',
 
-  navy: '#241F45',
-  navySubtle: '#3A3564',
-  muted: '#8D89A8',
-  mutedLight: '#B7B4CC',
-  border: '#ECEAF6',
+  navy: '#211C3E',
+  navySubtle: '#4B4668',
+  muted: '#8A86A1',
+  mutedLight: '#B7B3C8',
+  border: '#EAE7F2',
 
-  purple: '#6C4FE0',
-  purpleDeep: '#5136B8',
-  pink: '#B15AC0',
-  orange: '#F0935A',
+  purple: '#6847D8',
+  purpleDeep: '#5433C2',
+  purpleSoft: '#EEE9FF',
+  pink: '#A94FC1',
+  orange: '#EA795D',
 
   cameraBackground: '#0E0C18',
   cameraOverlay: 'rgba(14, 12, 24, 0.55)',
   cameraPillBackground: 'rgba(255, 255, 255, 0.08)',
 
-  success: '#3FBF74',
-  danger: '#E5586B',
+  success: '#36B96C',
+  successSoft: '#EAF9F0',
+  danger: '#EF5B61',
+  dangerSoft: '#FFF0F1',
+  warning: '#F1A84A',
 } as const;
 
 /** Primary brand gradient used on the hero "scan" card, primary buttons, and success check. */
 export const primaryGradient = {
-  colors: [colors.purple, colors.pink, colors.orange],
+  colors: [colors.purpleDeep, colors.purple, colors.pink],
   start: { x: 0, y: 0 },
   end: { x: 1, y: 1 },
 };
@@ -44,27 +48,28 @@ export const docTypeGradients: Record<string, string[]> = {
 };
 
 export const radius = {
-  sm: 10,
-  md: 16,
-  lg: 22,
-  xl: 28,
+  sm: 8,
+  md: 14,
+  lg: 20,
+  xl: 24,
   pill: 999,
 };
 
 export const spacing = {
   xs: 4,
   sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
+  md: 14,
+  lg: 20,
+  xl: 28,
+  xxl: 36,
 };
 
 export const typography = {
-  title: { fontSize: 28, fontWeight: '700' as const, color: colors.navy },
-  subtitle: { fontSize: 15, fontWeight: '400' as const, color: colors.muted },
-  heading: { fontSize: 20, fontWeight: '700' as const, color: colors.navy },
-  body: { fontSize: 15, fontWeight: '600' as const, color: colors.navy },
-  caption: { fontSize: 13, fontWeight: '400' as const, color: colors.muted },
+  title: { fontSize: 24, fontWeight: '800' as const, color: colors.navy },
+  subtitle: { fontSize: 13, fontWeight: '400' as const, color: colors.muted },
+  heading: { fontSize: 18, fontWeight: '800' as const, color: colors.navy },
+  body: { fontSize: 14, fontWeight: '600' as const, color: colors.navy },
+  caption: { fontSize: 12, fontWeight: '400' as const, color: colors.muted },
 };
 
 /** Cross-platform shadows tuned so iOS matches the softer Android elevation look. */
