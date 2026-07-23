@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LinearGradient from 'react-native-linear-gradient';
 import { GradientIconTile } from '../components/GradientIconTile';
-import { FrameCornersIcon, TapIcon } from '../components/ModeIcons';
+import { FrameCornersIcon } from '../components/ModeIcons';
 import { SwipeableRow } from '../components/SwipeableRow';
 import { colors, primaryGradient, radius, spacing } from '../theme';
 import { formatRelativeTimestamp } from '../storage';
@@ -83,70 +83,27 @@ export function HomeScreen({
         <View style={styles.heroBlob} pointerEvents="none" />
 
         <View style={styles.heroIconWrap}>
-          <GradientIconTile documentType="driving_licence" size={56} />
+          <View style={styles.scanIconTile}>
+            <FrameCornersIcon color="#FFFFFF" size={32} />
+          </View>
         </View>
         <Text style={styles.heroTitle}>Scan a new document</Text>
         <Text style={styles.heroSubtitle}>Driving licence or passport</Text>
 
-        <View style={styles.modeRow}>
-          <TouchableOpacity
-            style={[styles.modeButton, captureMode === 'automatic' && styles.modeButtonActive]}
-            activeOpacity={0.85}
-            onPress={() => {
-              onChangeCaptureMode('automatic');
-              onRequestScan();
-            }}
-          >
-            <View
-              style={[
-                styles.modeIconBubble,
-                captureMode === 'automatic'
-                  ? styles.modeIconBubbleActive
-                  : styles.modeIconBubbleInactive,
-              ]}
-            >
-              {captureMode === 'automatic' && <View style={styles.modeIconGloss} />}
-              <FrameCornersIcon
-                color={captureMode === 'automatic' ? colors.purpleDeep : '#FFFFFF'}
-                size={18}
-              />
-            </View>
-            <Text
-              style={[
-                styles.modeLabel,
-                captureMode === 'automatic' ? styles.modeLabelActive : styles.modeLabelInactive,
-              ]}
-            >
-              Automatic
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeButton, captureMode === 'manual' && styles.modeButtonActive]}
-            activeOpacity={0.85}
-            onPress={() => {
-              onChangeCaptureMode('manual');
-              onRequestScan();
-            }}
-          >
-            <View
-              style={[
-                styles.modeIconBubble,
-                captureMode === 'manual' ? styles.modeIconBubbleActive : styles.modeIconBubbleInactive,
-              ]}
-            >
-              {captureMode === 'manual' && <View style={styles.modeIconGloss} />}
-              <TapIcon color={captureMode === 'manual' ? colors.purpleDeep : '#FFFFFF'} size={18} />
-            </View>
-            <Text
-              style={[
-                styles.modeLabel,
-                captureMode === 'manual' ? styles.modeLabelActive : styles.modeLabelInactive,
-              ]}
-            >
-              Manual
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          style={styles.startScanButton}
+          activeOpacity={0.85}
+          onPress={() => {
+            onChangeCaptureMode('automatic');
+            onRequestScan();
+          }}
+        >
+          <View style={styles.startScanIconWrap}>
+            <FrameCornersIcon color={colors.purpleDeep} size={20} />
+          </View>
+          <Text style={styles.startScanLabel}>Start Scan</Text>
+        </TouchableOpacity>
+        <Text style={styles.autoModeCaption}>Automatic mode (recommended)</Text>
       </LinearGradient>
 
       <View style={styles.listHeader}>
@@ -291,6 +248,16 @@ const styles = StyleSheet.create({
   heroIconWrap: {
     marginBottom: spacing.md,
   },
+  scanIconTile: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.32)',
+  },
   heroTitle: {
     color: '#FFFFFF',
     fontSize: 22,
@@ -302,62 +269,42 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: spacing.md,
   },
-  modeRow: {
+  startScanButton: {
+    width: '100%',
+    alignSelf: 'stretch',
     flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  modeButton: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    borderRadius: radius.md,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-    gap: 6,
-  },
-  modeButtonActive: {
-    backgroundColor: '#FFFFFF',
-  },
-  modeIconBubble: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  modeIconBubbleActive: {
-    backgroundColor: colors.purple,
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.md,
+    minHeight: 56,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     ...Platform.select({
       ios: {
-        shadowColor: colors.purple,
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.5,
-        shadowRadius: 6,
+        shadowColor: colors.navy,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
       },
-      android: { elevation: 4 },
+      android: { elevation: 3 },
     }),
   },
-  modeIconBubbleInactive: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  startScanIconWrap: {
+    marginRight: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modeIconGloss: {
-    position: 'absolute',
-    top: -8,
-    left: -6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-  },
-  modeLabel: {
-    fontSize: 15,
+  startScanLabel: {
+    fontSize: 17,
     fontWeight: '700',
-  },
-  modeLabelActive: {
     color: colors.purpleDeep,
   },
-  modeLabelInactive: {
-    color: '#FFFFFF',
+  autoModeCaption: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
   listHeader: {
     flexDirection: 'row',
