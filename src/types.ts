@@ -11,29 +11,37 @@ export type CaptureMode = 'automatic' | 'manual';
 
 export type DocumentSide = 'front' | 'back';
 
-/** Nationalities selectable in the pre-scan "Choose your nationality" step.
- * Scope for this build: Spain and Turkey only. Note this only records which
- * nationality the user selected - it does NOT verify the scanned document
- * actually matches that country (that would require OCR/MRZ parsing, not
- * built here). */
-export type Nationality = 'ES' | 'TR';
+/** Nationalities currently available in the pre-scan country picker. */
+export type Nationality = 'ES' | 'TR' | 'FR' | 'DE' | 'IT' | 'NL';
 
 export const NATIONALITY_LABELS: Record<Nationality, string> = {
   ES: 'Spain',
   TR: 'Turkey',
+  FR: 'France',
+  DE: 'Germany',
+  IT: 'Italy',
+  NL: 'Netherlands',
 };
 
 export const NATIONALITY_CODES: Record<Nationality, string> = {
   ES: 'ESP',
   TR: 'TUR',
+  FR: 'FRA',
+  DE: 'DEU',
+  IT: 'ITA',
+  NL: 'NLD',
 };
 
 export const NATIONALITY_FLAGS: Record<Nationality, string> = {
   ES: '🇪🇸',
   TR: '🇹🇷',
+  FR: '🇫🇷',
+  DE: '🇩🇪',
+  IT: '🇮🇹',
+  NL: '🇳🇱',
 };
 
-export const NATIONALITIES: Nationality[] = ['ES', 'TR'];
+export const NATIONALITIES: Nationality[] = ['ES', 'TR', 'FR', 'DE', 'IT', 'NL'];
 
 /** Result of a single scan, normalized from the document-scanner library's ImageObject. */
 export interface CapturedPhoto {

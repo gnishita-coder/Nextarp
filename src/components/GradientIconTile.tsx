@@ -1,8 +1,9 @@
 import React from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { colors, docTypeGradients } from '../theme';
+import { colors, docTypeGradients, elevationShadow } from '../theme';
 import type { DocumentType } from '../types';
+import { FrameCornersIcon } from './ModeIcons';
 
 interface Props {
   documentType: DocumentType;
@@ -37,12 +38,42 @@ export function GradientIconTile({ documentType, size = 48 }: Props) {
             { width: size * 0.6, height: size * 0.6, borderRadius: size * 0.3, top: -size * 0.18, left: -size * 0.16 },
           ]}
         />
-        <View style={[styles.card, { width: size * 0.52, height: size * 0.38 }]}>
-          <View style={styles.photoDot} />
-          <View style={styles.lines}>
-            <View style={styles.lineLong} />
-            <View style={styles.lineShort} />
-          </View>
+        <View style={[styles.scanIcon, { width: size * 0.52, height: size * 0.52 }]}>
+          <FrameCornersIcon color="#FFFFFF" size={size * 0.52} />
+          {documentType === 'passport' ? (
+            <View
+              style={[
+                styles.passportCircle,
+                {
+                  width: size * 0.14,
+                  height: size * 0.14,
+                  borderRadius: size * 0.07,
+                },
+              ]}
+            />
+          ) : (
+            <View
+              style={[
+                styles.scanDocument,
+                {
+                  width: size * 0.23,
+                  height: size * 0.16,
+                  borderRadius: size * 0.045,
+                },
+              ]}>
+              <View
+                style={[
+                  styles.scanDot,
+                  {
+                    width: size * 0.05,
+                    height: size * 0.05,
+                    borderRadius: size * 0.025,
+                  },
+                ]}
+              />
+              <View style={[styles.scanLine, { width: size * 0.07 }]} />
+            </View>
+          )}
         </View>
       </LinearGradient>
     </View>
@@ -51,16 +82,7 @@ export function GradientIconTile({ documentType, size = 48 }: Props) {
 
 const styles = StyleSheet.create({
   shadowWrap: {
-    ...Platform.select({
-      ios: {
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 5,
-      },
-    }),
+    ...elevationShadow('tile'),
   },
   tile: {
     alignItems: 'center',
@@ -71,36 +93,30 @@ const styles = StyleSheet.create({
     position: 'absolute',
     backgroundColor: 'rgba(255,255,255,0.35)',
   },
-  card: {
-    borderRadius: 4,
-    borderWidth: 1.4,
-    borderColor: 'rgba(255,255,255,0.95)',
-    flexDirection: 'row',
+  scanIcon: {
     alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  photoDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    marginRight: 4,
-  },
-  lines: {
-    flex: 1,
     justifyContent: 'center',
   },
-  lineLong: {
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    marginBottom: 3,
-    width: '100%',
+  scanDocument: {
+    position: 'absolute',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 2,
   },
-  lineShort: {
-    height: 2,
+  scanDot: {
+    backgroundColor: '#FFFFFF',
+  },
+  scanLine: {
+    height: 1.5,
     borderRadius: 1,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    width: '60%',
+    backgroundColor: '#FFFFFF',
+  },
+  passportCircle: {
+    position: 'absolute',
+    borderWidth: 1.6,
+    borderColor: '#FFFFFF',
   },
 });

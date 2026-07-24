@@ -1,6 +1,9 @@
-import React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@react-native-vector-icons/ionicons/static';
 import { colors, radius, spacing } from '../theme';
+import { AppBackButton } from './AppBackButton';
 import type { Nationality } from '../types';
 import { NATIONALITIES, NATIONALITY_CODES, NATIONALITY_FLAGS, NATIONALITY_LABELS } from '../types';
 
@@ -11,101 +14,154 @@ interface Props {
   onClose: () => void;
 }
 
-/**
- * Small bottom-sheet picker for the app-wide nationality setting - opened
- * from the flag icon in the Home header, matching the reference "Select
- * your language" sheet the client shared (compact, tap-a-row-to-select,
- * no separate full-screen step). Replaces the old full-screen
- * NationalityScreen, which required nationality + document type together
- * before every single scan.
- */
 export function NationalitySheet({ visible, selected, onSelect, onClose }: Props) {
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.backdropTouchable} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.grabber} />
-          <Text style={styles.title}>Select your nationality</Text>
-          <Text style={styles.subtitle}>Sets which country's ID you're scanning</Text>
+  const [query, setQuery] = useState('');
 
-          {NATIONALITIES.map(code => {
-            const isSelected = code === selected;
-            return (
-              <TouchableOpacity
-                key={code}
-                style={[styles.option, isSelected && styles.optionSelected]}
-                activeOpacity={0.8}
-                onPress={() => {
-                  onSelect(code);
-                  onClose();
-                }}>
-                <Text style={styles.flag}>{NATIONALITY_FLAGS[code]}</Text>
-                <View style={styles.optionText}>
-                  <Text style={styles.optionLabel}>{NATIONALITY_LABELS[code]}</Text>
-                  <Text style={styles.optionSubLabel}>{NATIONALITY_CODES[code]}</Text>
-                </View>
-                {isSelected && <Text style={styles.check}>{'✓'}</Text>}
-              </TouchableOpacity>
-            );
-          })}
+  useEffect(() => {
+    if (visible) setQuery('');
+  }, [visible]);
+
+  const visibleNationalities = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return NATIONALITIES;
+    return NATIONALITIES.filter(code =>
+      `${NATIONALITY_LABELS[code]} ${NATIONALITY_CODES[code]}`
+        .toLowerCase()
+        .includes(normalizedQuery),
+    );
+  }, [query]);
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}>
+      <SafeAreaView style={styles.screen}>
+        <View style={styles.header}>
+          <AppBackButton onPress={onClose} accessibilityLabel="Back" />
         </View>
-      </View>
+
+        <View style={styles.content}>
+          <Text style={styles.title}>Select your nationality</Text>
+          <Text style={styles.subtitle}>Select the country that issued{'\n'}your ID</Text>
+
+          <View style={styles.search}>
+            <Ionicons name="search-outline" color={colors.muted} size={20} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search country..."
+              placeholderTextColor={colors.muted}
+              style={styles.searchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Search country"
+            />
+          </View>
+
+          <View style={styles.options}>
+            {visibleNationalities.map(code => {
+              const isSelected = code === selected;
+              return (
+                <TouchableOpacity
+                  key={code}
+                  style={[styles.option, isSelected && styles.optionSelected]}
+                  activeOpacity={0.8}
+                  accessibilityRole="radio"
+                  accessibilityLabel={NATIONALITY_LABELS[code]}
+                  accessibilityState={{ checked: isSelected }}
+                  onPress={() => onSelect(code)}>
+                  <Text style={styles.flag}>{NATIONALITY_FLAGS[code]}</Text>
+                  <View style={styles.optionText}>
+                    <Text style={styles.optionLabel}>{NATIONALITY_LABELS[code]}</Text>
+                    <Text style={styles.optionSubLabel}>{NATIONALITY_CODES[code]}</Text>
+                  </View>
+                  {isSelected && (
+                    <Ionicons name="checkmark" color={colors.purple} size={24} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={styles.cancelButton}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Cancel nationality selection">
+          <Text style={styles.cancelLabel}>Cancel</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
+  screen: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(15, 12, 30, 0.45)',
+    backgroundColor: colors.background,
   },
-  backdropTouchable: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  sheet: {
-    backgroundColor: colors.cardWhite,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+  header: {
+    height: 56,
+    justifyContent: 'center',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xl,
   },
-  grabber: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.md,
+  content: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
   },
   title: {
-    fontSize: 19,
-    fontWeight: '700',
+    fontSize: 25,
+    fontWeight: '800',
     color: colors.navy,
     textAlign: 'center',
   },
   subtitle: {
-    fontSize: 13,
+    fontSize: 14,
+    lineHeight: 20,
     color: colors.muted,
     textAlign: 'center',
-    marginTop: 2,
-    marginBottom: spacing.md,
+    marginTop: spacing.sm,
+  },
+  search: {
+    height: 50,
+    marginTop: spacing.xxl,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.cardWhite,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.navy,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  options: {
+    marginTop: spacing.md,
+    gap: 2,
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.sm,
+    gap: spacing.sm,
+    minHeight: 58,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: radius.md,
   },
   optionSelected: {
-    backgroundColor: colors.backgroundSoft,
+    backgroundColor: colors.purpleSoft,
   },
   flag: {
-    fontSize: 28,
+    fontSize: 25,
     width: 36,
     textAlign: 'center',
   },
@@ -113,8 +169,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   optionLabel: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
     color: colors.navy,
   },
   optionSubLabel: {
@@ -122,9 +178,20 @@ const styles = StyleSheet.create({
     color: colors.muted,
     marginTop: 1,
   },
-  check: {
-    color: colors.purple,
-    fontSize: 18,
+  cancelButton: {
+    marginHorizontal: 32,
+    marginBottom: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.cardWhite,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  cancelLabel: {
+    color: colors.navySubtle,
     fontWeight: '700',
+    fontSize: 15,
   },
 });

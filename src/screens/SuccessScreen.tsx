@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  BackHandler,
   Image,
   Modal,
   StyleSheet,
@@ -9,16 +10,15 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import LinearGradient from 'react-native-linear-gradient';
-import RNFS from 'react-native-fs';
+import { Ionicons } from '@react-native-vector-icons/ionicons/static';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { colors, primaryGradient, radius, spacing } from '../theme';
+import { colors, radius, spacing } from '../theme';
+import { formatFileSize } from '../storage';
 import type { CapturedSide, DocumentType, Nationality } from '../types';
 import { DOCUMENT_LABELS, NATIONALITY_FLAGS, NATIONALITY_LABELS } from '../types';
 
 interface Props {
   documentType: DocumentType;
-  folderPath: string;
   sides: CapturedSide[];
   nationality?: Nationality;
   /** Called once the user confirms a name in the naming prompt below - the
@@ -27,20 +27,21 @@ interface Props {
    * Documents tab from then on. */
   onSaveWithName: (name: string) => void;
   onScanAnother: () => void;
+  onOpenDocument: () => void;
+  onDone: () => void;
 }
 
 export function SuccessScreen({
   documentType,
-  folderPath,
   sides,
   nationality,
   onSaveWithName,
   onScanAnother,
+  onOpenDocument,
+  onDone,
 }: Props) {
   const docLabel = DOCUMENT_LABELS[documentType];
-  const relativeFolder = folderPath.startsWith(RNFS.DocumentDirectoryPath)
-    ? folderPath.slice(RNFS.DocumentDirectoryPath.length + 1)
-    : folderPath;
+  const totalFileSize = sides.reduce((total, side) => total + side.fileSizeBytes, 0);
 
   const [nameModalVisible, setNameModalVisible] = useState(false);
   const [nameInput, setNameInput] = useState(docLabel);
@@ -55,52 +56,94 @@ export function SuccessScreen({
     onSaveWithName(nameInput.trim() || docLabel);
   };
 
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (nameModalVisible) {
+        setNameModalVisible(false);
+      } else {
+        onDone();
+      }
+      return true;
+    });
+    return () => subscription.remove();
+  }, [nameModalVisible, onDone]);
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.spacerTop} />
-
-      <View style={styles.checkShadowWrap}>
-        <LinearGradient
-          colors={primaryGradient.colors}
-          start={primaryGradient.start}
-          end={primaryGradient.end}
-          style={styles.checkCircle}
-        >
-          <View style={styles.checkGloss} />
-          <Text style={styles.checkGlyph}>{'✓'}</Text>
-        </LinearGradient>
+      <View style={styles.confetti} pointerEvents="none">
+        <Text style={[styles.confettiPiece, styles.confettiOne]}>●</Text>
+        <Text style={[styles.confettiPiece, styles.confettiTwo]}>◆</Text>
+        <Text style={[styles.confettiPiece, styles.confettiThree]}>—</Text>
+        <Text style={[styles.confettiPiece, styles.confettiFour]}>●</Text>
+        <Text style={[styles.confettiPiece, styles.confettiFive]}>◆</Text>
       </View>
 
-      <Text style={styles.title}>{docLabel} saved</Text>
+      <View style={styles.checkShadowWrap}>
+        <View style={styles.checkCircle}>
+          <Text style={styles.checkGlyph}>{'✓'}</Text>
+        </View>
+      </View>
+
+      <Text style={styles.title}>Document saved successfully!</Text>
       {nationality && (
         <Text style={styles.nationalityLine}>
           {NATIONALITY_FLAGS[nationality]} {NATIONALITY_LABELS[nationality]}
         </Text>
       )}
       <Text style={styles.subtitle}>
-        {sides.length > 1
-          ? 'Both sides were captured clearly and stored on this device.'
-          : 'The scan was captured clearly and stored on this device.'}
+        Both sides were captured clearly and{'\n'}stored securely in ID Vault.
       </Text>
 
       <View style={styles.thumbRow}>
-        {sides.map(s => (
-          <View key={s.side} style={styles.thumbCard}>
-            <Image source={{ uri: s.uri }} style={styles.thumbImage} resizeMode="cover" />
+        {(['front', 'back'] as const).map(side => {
+          const captured = sides.find(item => item.side === side);
+          return (
+          <View key={side} style={styles.thumbColumn}>
+            <View style={styles.thumbCard}>
+              {captured ? (
+                <>
+                  <Image source={{ uri: captured.uri }} style={styles.thumbImage} resizeMode="cover" />
+                  <View style={styles.thumbCheck}>
+                    <Text style={styles.thumbCheckText}>✓</Text>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.thumbPlaceholder}><Text style={styles.thumbPlaceholderGlyph}>⌗</Text></View>
+              )}
+            </View>
+            <Text style={styles.thumbLabel}>{side === 'front' ? 'Front side' : 'Back side'}</Text>
           </View>
-        ))}
+          );
+        })}
       </View>
 
-      <View style={styles.folderRow}>
-        <Text style={styles.folderIcon}>{'\u{1F4C1}'}</Text>
-        <Text style={styles.folderPath}>{relativeFolder}</Text>
-      </View>
+      <TouchableOpacity
+        style={styles.summaryCard}
+        onPress={openNamePrompt}
+        activeOpacity={0.75}
+        accessibilityRole="button"
+        accessibilityLabel={`Edit document name, currently ${docLabel}`}
+        accessibilityHint="Opens a dialog to rename this document">
+        <View style={styles.summaryIcon}><Text style={styles.summaryIconText}>📁</Text></View>
+        <View style={styles.summaryCopy}>
+          <Text style={styles.summaryTitle}>{docLabel}</Text>
+          <Text style={styles.summaryMeta}>
+            {sides.length} {sides.length === 1 ? 'page' : 'pages'} · {formatFileSize(totalFileSize)}
+          </Text>
+        </View>
+        <View style={styles.editIconButton}>
+          <Ionicons name="create-outline" color={colors.purple} size={20} />
+        </View>
+      </TouchableOpacity>
 
       <View style={styles.spacerBottom} />
 
-      <PrimaryButton label="Save" onPress={openNamePrompt} style={styles.saveButton} />
-      <TouchableOpacity style={styles.scanAnotherButton} onPress={onScanAnother}>
-        <Text style={styles.scanAnotherLabel}>Scan another document</Text>
+      <PrimaryButton label="Open document" onPress={onOpenDocument} style={styles.saveButton} />
+      <TouchableOpacity style={styles.scanAnotherButton} onPress={onScanAnother} activeOpacity={0.7}>
+        <Text style={styles.scanAnotherLabel}>Scan another</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.doneButton} onPress={onDone} activeOpacity={0.7}>
+        <Text style={styles.doneLabel}>Done</Text>
       </TouchableOpacity>
 
       <Modal
@@ -152,102 +195,227 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
+    paddingTop: 28,
   },
-  spacerTop: {
-    flex: 1,
+  confetti: {
+    position: 'absolute',
+    top: 16,
+    left: 0,
+    right: 0,
+    height: 120,
+  },
+  confettiPiece: {
+    position: 'absolute',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  confettiOne: {
+    left: '12%',
+    top: 35,
+    color: colors.purple,
+  },
+  confettiTwo: {
+    left: '28%',
+    top: 6,
+    color: colors.orange,
+  },
+  confettiThree: {
+    right: '25%',
+    top: 12,
+    color: colors.pink,
+    transform: [{ rotate: '45deg' }],
+  },
+  confettiFour: {
+    right: '11%',
+    top: 50,
+    color: colors.success,
+  },
+  confettiFive: {
+    left: '18%',
+    top: 110,
+    color: colors.warning,
   },
   spacerBottom: {
     flex: 1,
+    minHeight: 10,
   },
   checkShadowWrap: {
-    shadowColor: colors.purple,
+    shadowColor: colors.success,
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
+    shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 10,
   },
   checkCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  checkGloss: {
-    position: 'absolute',
-    top: -18,
-    left: -14,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: colors.success,
+    borderWidth: 5,
+    borderColor: colors.successSoft,
   },
   checkGlyph: {
     color: '#FFFFFF',
-    fontSize: 40,
-    fontWeight: '700',
+    fontSize: 28,
+    fontWeight: '800',
   },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 21,
+    fontWeight: '800',
     color: colors.navy,
-    marginTop: spacing.lg,
+    marginTop: 17,
   },
   nationalityLine: {
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 4,
-    fontWeight: '600',
+    fontSize: 14,
+    color: colors.navySubtle,
+    marginTop: 8,
+    fontWeight: '700',
   },
   subtitle: {
     fontSize: 14,
-    color: colors.muted,
+    color: colors.navySubtle,
     textAlign: 'center',
-    marginTop: spacing.sm,
+    marginTop: 11,
     paddingHorizontal: spacing.lg,
+    lineHeight: 21,
   },
   thumbRow: {
     flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.xl,
+    gap: 12,
+    marginTop: 18,
+    width: '100%',
+  },
+  thumbColumn: {
+    flex: 1,
   },
   thumbCard: {
-    width: 130,
-    height: 90,
-    borderRadius: radius.md,
+    width: '100%',
+    aspectRatio: 1.586,
+    borderRadius: 10,
     backgroundColor: colors.cardWhite,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 3,
   },
   thumbImage: {
     width: '100%',
     height: '100%',
+    borderRadius: 8,
   },
-  folderRow: {
+  thumbCheck: {
+    position: 'absolute',
+    right: 7,
+    bottom: 7,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.success,
+    borderWidth: 2,
+    borderColor: colors.cardWhite,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbCheckText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    lineHeight: 10,
+    fontWeight: '800',
+  },
+  thumbPlaceholder: {
+    flex: 1,
+    borderRadius: radius.sm,
+    backgroundColor: colors.backgroundSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbPlaceholderGlyph: {
+    color: colors.mutedLight,
+    fontSize: 24,
+  },
+  thumbLabel: {
+    marginTop: 7,
+    color: colors.navySubtle,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  summaryCard: {
+    width: '100%',
+    marginTop: 13,
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.md,
-    gap: spacing.xs,
+    borderRadius: 11,
+    backgroundColor: colors.cardWhite,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minHeight: 56,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
   },
-  folderIcon: {
-    fontSize: 13,
+  summaryIcon: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  folderPath: {
+  summaryIconText: {
+    fontSize: 19,
+  },
+  summaryCopy: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  summaryTitle: {
+    color: colors.navy,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  summaryMeta: {
     color: colors.muted,
-    fontSize: 13,
+    fontSize: 12,
+    marginTop: 4,
+  },
+  editIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.purpleSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
   saveButton: {
     alignSelf: 'stretch',
+    borderRadius: radius.pill,
   },
   scanAnotherButton: {
+    alignSelf: 'stretch',
     alignItems: 'center',
-    paddingVertical: spacing.md,
-    marginBottom: spacing.md,
+    minHeight: 50,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 11,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.purple,
   },
   scanAnotherLabel: {
+    color: colors.purple,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  doneButton: {
+    paddingVertical: 14,
+    paddingHorizontal: spacing.xl,
+    marginBottom: 0,
+  },
+  doneLabel: {
     color: colors.muted,
-    fontWeight: '600',
-    fontSize: 14,
+    fontWeight: '700',
+    fontSize: 15,
   },
   nameBackdrop: {
     flex: 1,
