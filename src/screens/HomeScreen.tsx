@@ -24,8 +24,10 @@ interface Props {
   onChangeCaptureMode: (mode: CaptureMode) => void;
   /** Called when the user taps Automatic or Manual - should open the document-type picker. */
   onRequestScan: () => void;
-  /** Called for "View all" and for tapping any row - both take the user to the Documents tab. */
+  /** Called for "View all" - opens the Documents tab list. */
   onViewAllDocuments: () => void;
+  /** Called when a recent-scan row is tapped - opens Document details. */
+  onOpenDocument: (id: string) => void;
   /** Called when a row is swiped left and its Delete button is tapped. */
   onDeleteDocument: (id: string) => void;
   /** Currently selected nationality (small header icon) and handler to open its picker sheet. */
@@ -39,6 +41,7 @@ export function HomeScreen({
   onChangeCaptureMode,
   onRequestScan,
   onViewAllDocuments,
+  onOpenDocument,
   onDeleteDocument,
   nationality,
   onPressNationality,
@@ -129,9 +132,9 @@ export function HomeScreen({
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.7}
-              onPress={onViewAllDocuments}
+              onPress={() => onOpenDocument(item.id)}
               accessibilityRole="button"
-              accessibilityLabel={`Open ${item.label} in Documents`}>
+              accessibilityLabel={`Open ${item.label}`}>
               {item.sides[0]?.uri ? (
                 <Image source={{ uri: item.sides[0].uri }} style={styles.thumbnail} resizeMode="cover" />
               ) : (

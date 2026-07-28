@@ -845,13 +845,7 @@ function App() {
                     />
                   ))}
                 {activeTab === 'settings' && (
-                  <SettingsScreen
-                    documentCount={documents.length}
-                    onDataCleared={refreshDocuments}
-                    onLoadingChange={loading =>
-                      setOperationLoading(loading ? 'Clearing saved documents…' : null)
-                    }
-                  />
+                  <SettingsScreen documentCount={documents.length} />
                 )}
               </View>
               <BottomTabBar active={activeTab} onChange={handleChangeTab} />
