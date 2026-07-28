@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/warning_backdrop"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#8C0E0C18"
+    android:paddingLeft="28dp"
+    android:paddingRight="28dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:background="@drawable/white_bg_warning_card"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingLeft="22dp"
+        android:paddingTop="26dp"
+        android:paddingRight="22dp"
+        android:paddingBottom="20dp">
+
+        <FrameLayout
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:background="@drawable/white_bg_warning_icon_circle">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="☀"
+                android:textColor="#F1A84A"
+                android:textSize="30sp" />
+        </FrameLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:gravity="center"
+            android:text="Use a dark background"
+            android:textColor="#211C3E"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="22dp"
+            android:gravity="center"
+            android:lineSpacingExtra="3dp"
+            android:text="The scanner works best on a dark, non-glossy surface. Please retake the scan on a darker background."
+            android:textColor="#4B4668"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/retake_button"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:background="@drawable/white_bg_warning_button"
+            android:gravity="center"
+            android:text="Retake Scan"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</FrameLayout>

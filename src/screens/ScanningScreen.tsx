@@ -37,7 +37,7 @@ export function ScanningScreen({ documentType, side }: Props) {
 
         <Text style={styles.title}>Preparing scanner</Text>
         <Text style={styles.text}>
-          We’re setting things up for a{'\n'}secure and accurate scan.
+          Place your document on a dark,{'\n'}non-glossy surface for best results.
         </Text>
 
         <View style={styles.checklist}>

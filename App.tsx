@@ -100,123 +100,14 @@ import { NATIONALITIES } from './src/types';
 const NATIONALITY_STORAGE_KEY = 'nextarp.nationality.v1';
 /** Fixed duration the "Preparing scanner" screen stays visible after nationality selection. */
 const SCANNER_PREPARATION_DURATION_MS = 4000;
+/**
+ * Android stuck-scan tip is shown natively over ML Kit after 5s (see
+ * SinglePageScannerModule). If the user cancels before that fires but
+ * after this long, show the RN modal once as a fallback.
+ */
+const SCAN_CANCEL_HINT_MS = 5_000;
 const allowLoadingOverlayToRender = () =>
   new Promise<void>(resolve => setTimeout(resolve, 180));
-
-/**
- * Post-capture white-background detection.
- *
- * We look at THREE regions of the captured image and fire the "use a
- * dark background" modal if ANY of them says "white surface":
- *
- *   A. Whole-image mean + variance
- *      Catches the case where ML Kit couldn't crop at all and just
- *      returned a mostly-uniform bright frame. Rare. Requires HIGH
- *      mean AND LOW variance so a light-coloured card with dark
- *      printing (Spanish DNI back, passport bio page) is NOT flagged.
- *
- *   B. Full-border mean + variance
- *      Averaged around the whole outer 6% strip. Fires when the
- *      surface is uniformly bright on ALL sides of the loose crop.
- *
- *   C. Brightest-corner mean + variance
- *      The MOST ROBUST signal against mixed backgrounds. If ML Kit's
- *      loose crop showed a white surface at the top-left but a dark
- *      shadow / phone case / desk edge at the bottom, the border
- *      average is contaminated and signal B stays quiet - but the
- *      top-left CORNER is still cleanly white. Corner sampling looks
- *      at each of the four 8%x8% corner patches independently on the
- *      native side and returns the one that looks most like a plain
- *      surface. Any single clean-white corner is enough to fire.
- *
- * Any one of A, B, or C firing => modal shown. When all signals are
- * missing (fallback JS analysis, iOS), we skip the modal.
- *
- * CAVEAT: if ML Kit ever crops with pixel-perfect tightness on a
- * white surface (very rare but possible - e.g. very high-contrast
- * lighting on a card with a coloured border), NONE of these signals
- * can fire because the surface is entirely gone before we see the
- * image. That's a physical limit of running the check AFTER ML Kit;
- * only the custom-scanner path (live camera frames before capture)
- * can catch that scenario.
- *
- * Tune with the log line below (`adb logcat -s ReactNativeJS:D`).
- */
-const POST_CAPTURE_WHITE_BACKGROUND_BRIGHTNESS_THRESHOLD = 190;
-const POST_CAPTURE_WHITE_BACKGROUND_VARIANCE_THRESHOLD = 1500;
-const POST_CAPTURE_BORDER_BRIGHTNESS_THRESHOLD = 220;
-const POST_CAPTURE_BORDER_VARIANCE_THRESHOLD = 800;
-const POST_CAPTURE_CORNER_BRIGHTNESS_THRESHOLD = 230;
-const POST_CAPTURE_CORNER_VARIANCE_THRESHOLD = 500;
-
-type WhiteBackgroundSignals = {
-  brightness: number;
-  variance: number | undefined;
-  borderBrightness: number | undefined;
-  borderVariance: number | undefined;
-  cornerBrightness: number | undefined;
-  cornerVariance: number | undefined;
-};
-
-/**
- * Pure decision helper. Android-only per client scope. Logs all
- * observed values so we can calibrate against real device output.
- */
-function shouldShowWhiteBackgroundWarning(signals: WhiteBackgroundSignals): boolean {
-  if (Platform.OS !== 'android') return false;
-  if (!Number.isFinite(signals.brightness)) return false;
-
-  // Signal A: whole image is uniformly bright.
-  const wholeBright =
-    signals.brightness > POST_CAPTURE_WHITE_BACKGROUND_BRIGHTNESS_THRESHOLD;
-  const wholeUniform =
-    typeof signals.variance === 'number' &&
-    Number.isFinite(signals.variance) &&
-    signals.variance < POST_CAPTURE_WHITE_BACKGROUND_VARIANCE_THRESHOLD;
-  const whiteWhole = wholeBright && wholeUniform;
-
-  // Signal B: outer border of the image is uniformly bright (loose
-  // ML Kit crop showing the surface around the card).
-  const borderBright =
-    typeof signals.borderBrightness === 'number' &&
-    Number.isFinite(signals.borderBrightness) &&
-    signals.borderBrightness > POST_CAPTURE_BORDER_BRIGHTNESS_THRESHOLD;
-  const borderUniform =
-    typeof signals.borderVariance === 'number' &&
-    Number.isFinite(signals.borderVariance) &&
-    signals.borderVariance < POST_CAPTURE_BORDER_VARIANCE_THRESHOLD;
-  const whiteBorder = borderBright && borderUniform;
-
-  // Signal C: at least one corner patch is very bright and uniform
-  // (robust against mixed backgrounds - white on top, dark on
-  // bottom, etc). This is the strongest signal in practice.
-  const cornerBright =
-    typeof signals.cornerBrightness === 'number' &&
-    Number.isFinite(signals.cornerBrightness) &&
-    signals.cornerBrightness > POST_CAPTURE_CORNER_BRIGHTNESS_THRESHOLD;
-  const cornerUniform =
-    typeof signals.cornerVariance === 'number' &&
-    Number.isFinite(signals.cornerVariance) &&
-    signals.cornerVariance < POST_CAPTURE_CORNER_VARIANCE_THRESHOLD;
-  const whiteCorner = cornerBright && cornerUniform;
-
-  const trigger = whiteWhole || whiteBorder || whiteCorner;
-
-  const fmt = (n: number | undefined) =>
-    typeof n === 'number' && Number.isFinite(n) ? n.toFixed(1) : 'n/a';
-  console.log(
-    `[NextarpSDK] white-bg check: ` +
-      `whole mean=${fmt(signals.brightness)} (>${POST_CAPTURE_WHITE_BACKGROUND_BRIGHTNESS_THRESHOLD}?${wholeBright}) ` +
-      `var=${fmt(signals.variance)} (<${POST_CAPTURE_WHITE_BACKGROUND_VARIANCE_THRESHOLD}?${wholeUniform}) | ` +
-      `border mean=${fmt(signals.borderBrightness)} (>${POST_CAPTURE_BORDER_BRIGHTNESS_THRESHOLD}?${borderBright}) ` +
-      `var=${fmt(signals.borderVariance)} (<${POST_CAPTURE_BORDER_VARIANCE_THRESHOLD}?${borderUniform}) | ` +
-      `corner mean=${fmt(signals.cornerBrightness)} (>${POST_CAPTURE_CORNER_BRIGHTNESS_THRESHOLD}?${cornerBright}) ` +
-      `var=${fmt(signals.cornerVariance)} (<${POST_CAPTURE_CORNER_VARIANCE_THRESHOLD}?${cornerUniform}) ` +
-      `=> ${trigger ? 'SHOW' : 'skip'}`,
-  );
-  return trigger;
-}
-
 
 // The back side of a driving licence/passport never has a face photo (so
 // BackSideScreen doesn't run a face check at all - see its own comments) and,
@@ -535,7 +426,12 @@ function App() {
   const startFrontScan = useCallback(
     async (
       documentType: DocumentType,
-      options?: { stayOnCancel?: boolean; nationality?: Nationality },
+      options?: {
+        stayOnCancel?: boolean;
+        nationality?: Nationality;
+        /** After native tip + Retake: reopen once without showing tip again. */
+        skipStuckWarning?: boolean;
+      },
     ) => {
       try {
         setOperationLoading('Opening scanner…');
@@ -544,10 +440,49 @@ function App() {
           documentType,
           side: 'front',
           captureMode,
+          skipStuckWarning: options?.skipStuckWarning,
         });
+
+        if (result.scanTimedOut) {
+          // Native "Use a dark background" overlay was already shown over
+          // ML Kit and the user tapped Retake. Do NOT show the RN modal
+          // again (double-popup), and reopen with skipStuckWarning so the
+          // tip does not loop on the immediate retake.
+          setOperationLoading(null);
+          setPreparingScan(null);
+          setWhiteBackgroundWarning(null);
+          setTimeout(() => {
+            startFrontScan(documentType, {
+              ...options,
+              stayOnCancel: true,
+              skipStuckWarning: true,
+            });
+          }, 300);
+          return;
+        }
 
         if (result.didCancel) {
           setOperationLoading(null);
+          // Fallback: user closed ML Kit after a long hang before the
+          // native overlay fired (or on a path that skipped it).
+          const elapsed = result.elapsedMs ?? 0;
+          if (
+            Platform.OS === 'android' &&
+            !options?.skipStuckWarning &&
+            elapsed >= SCAN_CANCEL_HINT_MS
+          ) {
+            setWhiteBackgroundWarning({
+              onRetake: () => {
+                setWhiteBackgroundWarning(null);
+                startFrontScan(documentType, {
+                  ...options,
+                  stayOnCancel: true,
+                  skipStuckWarning: true,
+                });
+              },
+            });
+            return;
+          }
           if (!options?.stayOnCancel) {
             goHome();
           }
@@ -576,36 +511,6 @@ function App() {
 
         const image = result.image;
 
-        // FAST PATH - native brightness gate. The scanner module
-        // already computed mean luma while the bitmap was still
-        // decoded, so we can decide "white background?" here without
-        // running the expensive JS JPEG decode / face-detection / OCR
-        // pipeline first. On a real device this typically fires the
-        // popup within ~150ms of the user tapping Next on ML Kit's
-        // review screen, vs ~1-2s if we waited for the full quality
-        // analysis. Falls through to the standard path when brightness
-        // is missing (iOS today) or below the threshold.
-        if (
-          typeof image.brightness === 'number' &&
-          shouldShowWhiteBackgroundWarning({
-            brightness: image.brightness,
-            variance: image.brightnessVariance,
-            borderBrightness: image.borderBrightness,
-            borderVariance: image.borderBrightnessVariance,
-            cornerBrightness: image.brightestCornerBrightness,
-            cornerVariance: image.brightestCornerVariance,
-          })
-        ) {
-          setOperationLoading(null);
-          setWhiteBackgroundWarning({
-            onRetake: () => {
-              setWhiteBackgroundWarning(null);
-              startFrontScan(documentType, { ...options, stayOnCancel: true });
-            },
-          });
-          return;
-        }
-
         setOperationLoading('Checking captured image…');
         // Let the native scanner dismiss and paint the loading overlay before
         // JPEG decoding and quality analysis perform CPU-heavy work.
@@ -618,31 +523,6 @@ function App() {
         ]);
 
         setOperationLoading(null);
-        // Fallback branch: brightness wasn't in the native payload
-        // (iOS today) or slipped past the native check. Use the more
-        // detailed JS analysis result as a safety net. analyzeImageQuality
-        // doesn't compute variance or border stats, so this branch
-        // will always fail both signals A and B and effectively never
-        // fire - intentional: without a surface-colour signal we
-        // can't safely distinguish a light card from a light surface.
-        if (
-          shouldShowWhiteBackgroundWarning({
-            brightness: quality.brightness,
-            variance: undefined,
-            borderBrightness: undefined,
-            borderVariance: undefined,
-            cornerBrightness: undefined,
-            cornerVariance: undefined,
-          })
-        ) {
-          setWhiteBackgroundWarning({
-            onRetake: () => {
-              setWhiteBackgroundWarning(null);
-              startFrontScan(documentType, { ...options, stayOnCancel: true });
-            },
-          });
-          return;
-        }
 
         const reviewFlow: ReviewFlow = {
           screen: 'review',
@@ -782,7 +662,10 @@ function App() {
    * several real backs (Turkish, Spanish driving licence) have no printed
    * country name either, so the nationality/OCR check is skipped (see
    * SKIPPED_NATIONALITY_CHECK above). */
-  const handleCaptureBackSide = useCallback(async (documentType: DocumentType) => {
+  const handleCaptureBackSide = useCallback(async (
+    documentType: DocumentType,
+    options?: { skipStuckWarning?: boolean },
+  ) => {
     setCapturingBack(true);
     try {
       await allowLoadingOverlayToRender();
@@ -790,9 +673,36 @@ function App() {
         documentType,
         side: 'back',
         captureMode,
+        skipStuckWarning: options?.skipStuckWarning,
       });
 
+      if (result.scanTimedOut) {
+        // Native tip already handled Retake — reopen once without a
+        // second RN modal / tip loop.
+        setTimeout(
+          () => handleCaptureBackSide(documentType, { skipStuckWarning: true }),
+          300,
+        );
+        return;
+      }
+
       if (result.didCancel) {
+        const elapsed = result.elapsedMs ?? 0;
+        if (
+          Platform.OS === 'android' &&
+          !options?.skipStuckWarning &&
+          elapsed >= SCAN_CANCEL_HINT_MS
+        ) {
+          setWhiteBackgroundWarning({
+            onRetake: () => {
+              setWhiteBackgroundWarning(null);
+              setTimeout(
+                () => handleCaptureBackSide(documentType, { skipStuckWarning: true }),
+                0,
+              );
+            },
+          });
+        }
         return;
       }
       if (result.error || !result.image) {
@@ -804,59 +714,9 @@ function App() {
       }
 
       const image = result.image;
-
-      // Fast native-brightness gate before the full JS analysis - see
-      // the matching branch in startFrontScan for why. Trades ~1s off
-      // the popup latency when the user is on a white background.
-      if (
-        typeof image.brightness === 'number' &&
-        shouldShowWhiteBackgroundWarning({
-          brightness: image.brightness,
-          variance: image.brightnessVariance,
-          borderBrightness: image.borderBrightness,
-          borderVariance: image.borderBrightnessVariance,
-          cornerBrightness: image.brightestCornerBrightness,
-          cornerVariance: image.brightestCornerVariance,
-        })
-      ) {
-        setWhiteBackgroundWarning({
-          onRetake: () => {
-            setWhiteBackgroundWarning(null);
-            setTimeout(() => handleCaptureBackSide(documentType), 0);
-          },
-        });
-        return;
-      }
-
       await allowLoadingOverlayToRender();
       const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
       const quality = await analyzeImageQuality(image.uri, image.width, image.height, documentType);
-
-      if (
-        shouldShowWhiteBackgroundWarning({
-          brightness: quality.brightness,
-          variance: undefined,
-          borderBrightness: undefined,
-          borderVariance: undefined,
-          cornerBrightness: undefined,
-          cornerVariance: undefined,
-        })
-      ) {
-        // Fallback (analyzeImageQuality lacks variance/border stats)
-        // - see the matching branch in startFrontScan; in practice
-        // this will never fire, which is intentional.
-        // Defer the recursive scan until AFTER this call's finally has
-        // run so its setCapturingBack(false) can't race with the retake's
-        // own setCapturingBack(true). Brief (<16ms) spinner flicker
-        // between retries is acceptable.
-        setWhiteBackgroundWarning({
-          onRetake: () => {
-            setWhiteBackgroundWarning(null);
-            setTimeout(() => handleCaptureBackSide(documentType), 0);
-          },
-        });
-        return;
-      }
 
       setFlow({
         screen: 'backSide',

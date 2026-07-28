@@ -5,6 +5,8 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.BaseActivityEventListener
@@ -17,6 +19,7 @@ import com.facebook.react.bridge.WritableNativeMap
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import com.nextarpsdk.MainActivity
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -26,21 +29,51 @@ import java.util.UUID
  *
  * ML Kit auto-detects the document edge and crops it. pageLimit is hard-coded
  * to 1 so the OS never offers "add another page" / "ready for next scan".
- * Flow: point camera → auto capture/crop → optional Retake/Keep for that
- * one photo → return to the app.
  *
- * White-background detection intentionally happens AFTER ML Kit returns
- * the captured image (see shouldShowWhiteBackgroundWarning in App.tsx).
- * ML Kit's scanner UI is a closed Google-owned activity we can't overlay
- * a live warning on top of; post-capture on the returned image is the
- * closest workable spot without giving up ML Kit's much better auto
- * edge-detection / perspective-correction UX during scanning.
+ * Stuck-scan handling (white / low-contrast backgrounds):
+ * After [STUCK_SCAN_TIMEOUT_MS] with no capture we present
+ * [WhiteBackgroundWarningActivity] on top of ML Kit once. Retake clears the
+ * scanner stack and resolves with scanTimedOut=true. The immediate JS retake
+ * can pass skipStuckWarning so the tip does not loop.
+ *
+ * A successful ML Kit capture always wins: the warning is dismissed quietly
+ * and the image is returned (no false timeout on a slow-but-valid dark scan).
  */
 class SinglePageScannerModule(
   private val reactContext: ReactApplicationContext,
 ) : ReactContextBaseJavaModule(reactContext) {
 
   private var scanPromise: Promise? = null
+  private var scanStartedAtMs: Long = 0L
+  private var warningShown = false
+  private var skipStuckWarning = false
+  private val mainHandler = Handler(Looper.getMainLooper())
+  private val stuckScanTimeoutRunnable = Runnable {
+    if (scanPromise == null || warningShown || skipStuckWarning) return@Runnable
+    Log.w(NAME, "Scan still open after ${STUCK_SCAN_TIMEOUT_MS}ms — showing dark-background warning")
+    warningShown = true
+    WhiteBackgroundWarningActivity.onRetake = {
+      val activity = reactApplicationContext.currentActivity
+      if (activity != null) {
+        resolveTimedOut(activity)
+      } else {
+        resolveTimedOutWithoutActivity()
+      }
+    }
+    try {
+      val intent =
+        Intent(reactApplicationContext, WhiteBackgroundWarningActivity::class.java).apply {
+          addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+      reactApplicationContext.startActivity(intent)
+    } catch (e: Exception) {
+      Log.e(NAME, "Could not present white-background warning", e)
+      warningShown = false
+      WhiteBackgroundWarningActivity.onRetake = null
+      val activity = reactApplicationContext.currentActivity
+      if (activity != null) resolveTimedOut(activity) else resolveTimedOutWithoutActivity()
+    }
+  }
 
   private val activityEventListener: ActivityEventListener =
     object : BaseActivityEventListener() {
@@ -50,40 +83,8 @@ class SinglePageScannerModule(
         resultCode: Int,
         data: Intent?,
       ) {
-        if (requestCode != REQUEST_CODE) return
-        val promise = scanPromise ?: return
-        scanPromise = null
-
-        if (resultCode == Activity.RESULT_CANCELED) {
-          val cancelled = WritableNativeMap()
-          cancelled.putBoolean("didCancel", true)
-          promise.resolve(cancelled)
-          return
-        }
-
-        if (resultCode != Activity.RESULT_OK || data == null) {
-          promise.reject("SCAN_FAILED", "Document scan failed")
-          return
-        }
-
-        try {
-          val result = GmsDocumentScanningResult.fromActivityResultIntent(data)
-          val pages = result?.pages
-          if (pages.isNullOrEmpty()) {
-            promise.reject("SCAN_EMPTY", "No page was captured")
-            return
-          }
-
-          val imageMap = copyToCache(pages.first().imageUri) ?: run {
-            promise.reject("SCAN_COPY", "Could not save the scanned image")
-            return
-          }
-          val response = WritableNativeMap()
-          response.putMap("image", imageMap)
-          promise.resolve(response)
-        } catch (e: Exception) {
-          Log.e(NAME, "Failed to handle scan result", e)
-          promise.reject("SCAN_ERROR", e.message, e)
+        if (requestCode == SCAN_REQUEST_CODE) {
+          handleScanResult(resultCode, data)
         }
       }
     }
@@ -102,7 +103,9 @@ class SinglePageScannerModule(
     val requestedMode =
       if (options.hasKey("captureMode")) options.getString("captureMode") else "automatic"
     val requestedSide = if (options.hasKey("side")) options.getString("side") else "front"
-    Log.d(NAME, "Opening $requestedSide scan ($requestedMode)")
+    skipStuckWarning =
+      options.hasKey("skipStuckWarning") && options.getBoolean("skipStuckWarning")
+    Log.d(NAME, "Opening $requestedSide scan ($requestedMode, skipStuckWarning=$skipStuckWarning)")
 
     val activity = reactApplicationContext.currentActivity
     if (activity == null) {
@@ -115,8 +118,9 @@ class SinglePageScannerModule(
     }
 
     scanPromise = promise
+    warningShown = false
+    scanStartedAtMs = System.currentTimeMillis()
 
-    // pageLimit(1) removes multi-page. FULL mode gives the strongest auto edge/crop.
     val scannerOptions =
       GmsDocumentScannerOptions.Builder()
         .setGalleryImportAllowed(false)
@@ -131,21 +135,121 @@ class SinglePageScannerModule(
         try {
           activity.startIntentSenderForResult(
             intentSender,
-            REQUEST_CODE,
+            SCAN_REQUEST_CODE,
             null,
             0,
             0,
             0,
           )
+          mainHandler.removeCallbacks(stuckScanTimeoutRunnable)
+          if (!skipStuckWarning) {
+            mainHandler.postDelayed(stuckScanTimeoutRunnable, STUCK_SCAN_TIMEOUT_MS)
+          }
         } catch (e: Exception) {
+          mainHandler.removeCallbacks(stuckScanTimeoutRunnable)
           scanPromise = null
           promise.reject("SCAN_START", e.message, e)
         }
       }
       .addOnFailureListener { e ->
+        mainHandler.removeCallbacks(stuckScanTimeoutRunnable)
         scanPromise = null
         promise.reject("SCAN_START", e.message, e)
       }
+  }
+
+  private fun resolveTimedOut(activity: Activity) {
+    mainHandler.removeCallbacks(stuckScanTimeoutRunnable)
+    WhiteBackgroundWarningActivity.onRetake = null
+    WhiteBackgroundWarningActivity.dismissQuietly()
+    val promise = scanPromise
+    scanPromise = null
+    warningShown = false
+    val elapsedMs =
+      (System.currentTimeMillis() - scanStartedAtMs).coerceAtLeast(STUCK_SCAN_TIMEOUT_MS)
+
+    // MainActivity is singleTask — CLEAR_TOP removes ML Kit (+ warning) above it.
+    try {
+      val home =
+        Intent(activity, MainActivity::class.java).apply {
+          addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+      activity.startActivity(home)
+    } catch (e: Exception) {
+      Log.e(NAME, "Could not return to MainActivity after timeout", e)
+      try {
+        @Suppress("DEPRECATION")
+        activity.finishActivity(SCAN_REQUEST_CODE)
+      } catch (_: Exception) {
+      }
+    }
+
+    if (promise != null) {
+      val response = WritableNativeMap()
+      response.putBoolean("scanTimedOut", true)
+      response.putDouble("elapsedMs", elapsedMs.toDouble())
+      promise.resolve(response)
+    }
+  }
+
+  private fun resolveTimedOutWithoutActivity() {
+    mainHandler.removeCallbacks(stuckScanTimeoutRunnable)
+    WhiteBackgroundWarningActivity.onRetake = null
+    WhiteBackgroundWarningActivity.dismissQuietly()
+    val promise = scanPromise ?: return
+    scanPromise = null
+    warningShown = false
+    val response = WritableNativeMap()
+    response.putBoolean("scanTimedOut", true)
+    response.putDouble("elapsedMs", STUCK_SCAN_TIMEOUT_MS.toDouble())
+    promise.resolve(response)
+  }
+
+  private fun handleScanResult(resultCode: Int, data: Intent?) {
+    // Warning / Retake path may already have resolved the promise.
+    val promise = scanPromise ?: return
+    scanPromise = null
+    mainHandler.removeCallbacks(stuckScanTimeoutRunnable)
+    WhiteBackgroundWarningActivity.onRetake = null
+    // Successful (or cancelled) capture while the tip is visible: drop it
+    // quietly so we never leave a stale overlay above MainActivity.
+    WhiteBackgroundWarningActivity.dismissQuietly()
+    val elapsedMs = (System.currentTimeMillis() - scanStartedAtMs).coerceAtLeast(0L)
+    warningShown = false
+
+    if (resultCode == Activity.RESULT_CANCELED) {
+      val cancelled = WritableNativeMap()
+      cancelled.putBoolean("didCancel", true)
+      cancelled.putDouble("elapsedMs", elapsedMs.toDouble())
+      promise.resolve(cancelled)
+      return
+    }
+
+    if (resultCode != Activity.RESULT_OK || data == null) {
+      promise.reject("SCAN_FAILED", "Document scan failed")
+      return
+    }
+
+    try {
+      val result = GmsDocumentScanningResult.fromActivityResultIntent(data)
+      val pages = result?.pages
+      if (pages.isNullOrEmpty()) {
+        promise.reject("SCAN_EMPTY", "No page was captured")
+        return
+      }
+
+      val imageMap = copyToCache(pages.first().imageUri) ?: run {
+        promise.reject("SCAN_COPY", "Could not save the scanned image")
+        return
+      }
+      val response = WritableNativeMap()
+      response.putMap("image", imageMap)
+      response.putDouble("elapsedMs", elapsedMs.toDouble())
+      promise.resolve(response)
+    } catch (e: Exception) {
+      Log.e(NAME, "Failed to handle scan result", e)
+      promise.reject("SCAN_ERROR", e.message, e)
+    }
   }
 
   private fun copyToCache(imageUri: Uri): WritableNativeMap? {
@@ -390,6 +494,7 @@ class SinglePageScannerModule(
 
   companion object {
     const val NAME = "SinglePageScanner"
-    private const val REQUEST_CODE = 29101
+    private const val SCAN_REQUEST_CODE = 29101
+    private const val STUCK_SCAN_TIMEOUT_MS = 5_000L
   }
 }

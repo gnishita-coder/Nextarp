@@ -57,11 +57,22 @@ export type SinglePageScanResult = {
   errorMessage?: string;
   image?: CapturedScanImage;
   images?: CapturedScanImage[];
+  /**
+   * Android: ML Kit stayed open past the stuck-scan timeout (white /
+   * low-contrast backgrounds hang on "Scanning… hold steady"). Native
+   * already showed the dark-background tip over the scanner; JS should
+   * reopen once with skipStuckWarning (no second RN modal).
+   */
+  scanTimedOut?: boolean;
+  /** Wall-clock ms the native scanner was open (Android). */
+  elapsedMs?: number;
 };
 
 type SinglePageScannerNative = {
   launch: (options: SinglePageScannerOptions) => Promise<{
     didCancel?: boolean;
+    scanTimedOut?: boolean;
+    elapsedMs?: number;
     image?: CapturedScanImage & {
       brightness?: number;
       brightnessVariance?: number;
@@ -77,6 +88,12 @@ export type SinglePageScannerOptions = {
   documentType: DocumentType;
   side: DocumentSide;
   captureMode: CaptureMode;
+  /**
+   * Android: skip the 5s stuck-scan native tip for this launch.
+   * Used after the user already saw it and tapped Retake, so the
+   * immediate reopen does not loop the same popup.
+   */
+  skipStuckWarning?: boolean;
 };
 
 const NativeSinglePageScanner = NativeModules.SinglePageScanner as
@@ -102,13 +119,23 @@ export async function launchSinglePageScanner(
 
   try {
     const result = await NativeSinglePageScanner.launch(options);
+    if (result.scanTimedOut) {
+      return {
+        scanTimedOut: true,
+        elapsedMs: result.elapsedMs,
+      };
+    }
     if (result.didCancel) {
-      return { didCancel: true };
+      return { didCancel: true, elapsedMs: result.elapsedMs };
     }
     if (!result.image?.uri) {
       return { error: true, errorMessage: 'No image was captured' };
     }
-    return { image: result.image, images: [result.image] };
+    return {
+      image: result.image,
+      images: [result.image],
+      elapsedMs: result.elapsedMs,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (/cancel/i.test(message)) {
