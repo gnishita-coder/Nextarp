@@ -71,7 +71,8 @@ import { ReviewScreen } from './src/screens/ReviewScreen';
 import { DocumentFlipScreen } from './src/screens/DocumentFlipScreen';
 import { BackSideScreen } from './src/screens/BackSideScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
-import { ScanningScreen } from './src/screens/ScanningScreen';
+import { FrontScanIntroScreen } from './src/screens/FrontScanIntroScreen';
+import { FrontCaptureSuccessScreen } from './src/screens/FrontCaptureSuccessScreen';
 import { DocumentTypeSheet } from './src/components/DocumentTypeSheet';
 import { NationalitySheet } from './src/components/NationalitySheet';
 import { BottomTabBar, type TabKey } from './src/components/BottomTabBar';
@@ -99,8 +100,6 @@ import type {
 import { NATIONALITIES } from './src/types';
 
 const NATIONALITY_STORAGE_KEY = 'nextarp.nationality.v1';
-/** Fixed duration the "Preparing scanner" screen stays visible after nationality selection. */
-const SCANNER_PREPARATION_DURATION_MS = 4000;
 /**
  * Android stuck-scan tip is shown natively over ML Kit after 5s (see
  * SinglePageScannerModule). If the user cancels before that fires but
@@ -132,6 +131,12 @@ type Flow =
       quality: QualityReport;
       faceCheck: FaceCheckResult;
       nationalityCheck: NationalityCheckResult;
+    }
+  | {
+      /** Brief animated confirmation shown after the front review passes and
+       *  the front photo has been persisted. Auto-advances into `flip`. */
+      screen: 'frontSuccess';
+      documentType: DocumentType;
     }
   | {
       /** Front validated + saved — cue user to flip before back capture. */
@@ -175,7 +180,7 @@ function App() {
   const [saving, setSaving] = useState(false);
   // Loading state for BackSideScreen's "Capture back side" button - unlike
   // the front side, back-side capture doesn't navigate through the
-  // transitional ScanningScreen, it just shows a spinner in place.
+  // transitional intro/success screens, it just shows a spinner in place.
   const [capturingBack, setCapturingBack] = useState(false);
   // Visibility + retake handler for the on-brand "Use a dark background"
   // modal shown when a captured scan's average brightness suggests it was
@@ -185,9 +190,15 @@ function App() {
   const [whiteBackgroundWarning, setWhiteBackgroundWarning] = useState<{
     onRetake: () => void;
   } | null>(null);
+  // Instructional "position the front side" screen shown BEFORE the OS
+  // scanner opens for the front side. Rendered as an overlay on top of
+  // Home so the native scanner is still presented from Home's stable
+  // React root when the user taps "Start scan" (see iOS timing note on
+  // startFrontScan). The chosen nationality is captured here so the tap
+  // handler doesn't race against unrelated state updates.
   const [preparingScan, setPreparingScan] = useState<{
     documentType: DocumentType;
-    side: 'front' | 'back';
+    nationality: Nationality;
   } | null>(null);
   // Which document (if any) is open in the full front+back "PDF style"
   // viewer within the Documents tab. Cleared whenever the user leaves that
@@ -212,7 +223,6 @@ function App() {
   const [documentTypePickerVisible, setDocumentTypePickerVisible] = useState(false);
   const [pendingDocumentType, setPendingDocumentType] = useState<DocumentType | null>(null);
   const nationalityTransitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scannerPreparationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scannerLaunchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Accumulates sides + folder path across a single document's capture session.
@@ -259,10 +269,8 @@ function App() {
 
   const clearPendingScanTimers = useCallback(() => {
     if (nationalityTransitionTimer.current) clearTimeout(nationalityTransitionTimer.current);
-    if (scannerPreparationTimer.current) clearTimeout(scannerPreparationTimer.current);
     if (scannerLaunchTimer.current) clearTimeout(scannerLaunchTimer.current);
     nationalityTransitionTimer.current = null;
-    scannerPreparationTimer.current = null;
     scannerLaunchTimer.current = null;
   }, []);
 
@@ -603,25 +611,32 @@ function App() {
 
       const documentType = pendingDocumentType;
       setPendingDocumentType(null);
-      setPreparingScan({ documentType, side: 'front' });
-      // Keep Home mounted underneath this lightweight preparation overlay.
-      // Show it for a fixed 4 s after nationality selection, then remove it
-      // before presenting the native scanner so iOS always presents from a
-      // stable React root after the nationality picker dismisses.
-      scannerPreparationTimer.current = setTimeout(() => {
-        scannerPreparationTimer.current = null;
-        setPreparingScan(null);
-        scannerLaunchTimer.current = setTimeout(
-          () => {
-            scannerLaunchTimer.current = null;
-            startFrontScan(documentType, { nationality: next });
-          },
-          Platform.OS === 'ios' ? 120 : 40,
-        );
-      }, SCANNER_PREPARATION_DURATION_MS);
+      // Show the animated "position the front side" instruction overlay
+      // on top of Home. The user drives the transition by tapping "Start
+      // scan" on that overlay - see handleStartFrontScan below - so the
+      // native scanner is only launched in response to an explicit tap,
+      // not a background timer.
+      setPreparingScan({ documentType, nationality: next });
     },
-    [pendingDocumentType, persistNationalitySelection, startFrontScan],
+    [pendingDocumentType, persistNationalitySelection],
   );
+
+  /** Called from the FrontScanIntroScreen "Start scan" button. Tears down
+   *  the intro overlay first so the native scanner is presented from
+   *  Home's stable React root (same iOS timing concern noted on
+   *  startFrontScan below). */
+  const handleStartFrontScan = useCallback(() => {
+    if (!preparingScan) return;
+    const { documentType, nationality: chosen } = preparingScan;
+    setPreparingScan(null);
+    scannerLaunchTimer.current = setTimeout(
+      () => {
+        scannerLaunchTimer.current = null;
+        startFrontScan(documentType, { nationality: chosen });
+      },
+      Platform.OS === 'ios' ? 150 : 60,
+    );
+  }, [preparingScan, startFrontScan]);
 
   const handleRetakeFront = useCallback(
     (documentType: DocumentType) => {
@@ -631,11 +646,12 @@ function App() {
   );
 
   /** Front Review's Next button: persists the front photo, then shows the
-   * flip cue. Back camera opens only after the user continues from Flip. */
+   * "Front side captured" success beat, which self-advances into the flip
+   * cue. Back camera opens only after the user continues from Flip. */
   const handleContinueToBackSide = useCallback(
     async (documentType: DocumentType, photo: CapturedPhoto) => {
       if (sessionFolderPath && sessionSides.some(side => side.side === 'front')) {
-        setFlow({ screen: 'flip', documentType });
+        setFlow({ screen: 'frontSuccess', documentType });
         return;
       }
       setSaving(true);
@@ -649,7 +665,7 @@ function App() {
         );
         setSessionSides([savedSide]);
         setSessionFolderPath(folderPath);
-        setFlow({ screen: 'flip', documentType });
+        setFlow({ screen: 'frontSuccess', documentType });
       } catch (err) {
         console.warn('[NextarpSDK] Failed to save the front side', err);
         Alert.alert(
@@ -666,7 +682,7 @@ function App() {
   );
 
   /** BackSideScreen's "Capture back side" / Retake button. Runs in place
-   * (no ScanningScreen transition) - only quality analysis runs here, since
+   * (no intro/success transition) - only quality analysis runs here, since
    * the back of a driving licence/passport never has a face photo, and
    * several real backs (Turkish, Spanish driving licence) have no printed
    * country name either, so the nationality/OCR check is skipped (see
@@ -938,6 +954,22 @@ function App() {
             />
           )}
 
+          {flow.screen === 'frontSuccess' && (
+            <FrontCaptureSuccessScreen
+              documentType={flow.documentType}
+              onBack={() => {
+                if (frontReviewFlow) {
+                  setFlow(frontReviewFlow);
+                } else {
+                  goHome();
+                }
+              }}
+              onContinue={() =>
+                setFlow({ screen: 'flip', documentType: flow.documentType })
+              }
+            />
+          )}
+
           {flow.screen === 'flip' && (
             <DocumentFlipScreen
               documentType={flow.documentType}
@@ -997,9 +1029,13 @@ function App() {
 
           {preparingScan && (
             <View style={styles.preparingOverlay}>
-              <ScanningScreen
+              <FrontScanIntroScreen
                 documentType={preparingScan.documentType}
-                side={preparingScan.side}
+                onBack={() => {
+                  clearPendingScanTimers();
+                  setPreparingScan(null);
+                }}
+                onContinue={handleStartFrontScan}
               />
             </View>
           )}
