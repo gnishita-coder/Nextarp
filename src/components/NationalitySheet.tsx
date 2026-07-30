@@ -3,7 +3,7 @@ import { Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons/static';
 import { colors, radius, spacing } from '../theme';
-import { AppBackButton } from './AppBackButton';
+import { ScreenHeader } from './ScreenHeader';
 import type { Nationality } from '../types';
 import { NATIONALITIES, NATIONALITY_CODES, NATIONALITY_FLAGS, NATIONALITY_LABELS } from '../types';
 
@@ -37,10 +37,8 @@ export function NationalitySheet({ visible, selected, onSelect, onClose }: Props
       animationType="slide"
       presentationStyle="fullScreen"
       onRequestClose={onClose}>
-      <SafeAreaView style={styles.screen}>
-        <View style={styles.header}>
-          <AppBackButton onPress={onClose} accessibilityLabel="Back" />
-        </View>
+      <SafeAreaView style={styles.screen} edges={['top', 'left', 'right', 'bottom']}>
+        <ScreenHeader variant="inline" onBack={onClose} accessibilityLabel="Back" />
 
         <View style={styles.content}>
           <Text style={styles.title}>Select your nationality</Text>
@@ -102,11 +100,6 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  header: {
-    height: 56,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
   },
   content: {
     flex: 1,

@@ -40,7 +40,7 @@ function apiLevelToAndroidVersion(apiLevel: number): string {
 }
 
 export function getMinSdkLabel(): string {
-  return Platform.OS === 'android' ? 'Min Android Version' : 'Min iOS';
+  return Platform.OS === 'android' ? 'Min Android Version' : 'Min iOS Version';
 }
 
 export function getMinSdkValue(): string {

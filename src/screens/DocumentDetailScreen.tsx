@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from '../theme';
 import { formatRelativeTimestamp } from '../storage';
-import { AppBackButton } from '../components/AppBackButton';
+import { ScreenHeader } from '../components/ScreenHeader';
 import type { SavedDocument } from '../types';
 import { NATIONALITY_FLAGS, NATIONALITY_LABELS } from '../types';
 
@@ -52,44 +52,43 @@ export function DocumentDetailScreen({ document, onBack, onRename }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <AppBackButton
-          onPress={onBack}
-          accessibilityLabel="Back to documents"
-        />
-        <View style={styles.headerText}>
-          <Text style={styles.eyebrow}>DOCUMENT DETAILS</Text>
-          {isEditingName ? (
-            <TextInput
-              style={styles.titleInput}
-              value={nameInput}
-              onChangeText={setNameInput}
-              autoFocus
-              selectTextOnFocus
-              returnKeyType="done"
-              onSubmitEditing={confirmRename}
-            />
-          ) : (
-            <Text style={styles.title} numberOfLines={1}>
-              {document.label}
-              {document.nationality ? ` ${NATIONALITY_FLAGS[document.nationality]}` : ''}
-            </Text>
-          )}
-          <Text style={styles.subtitle}>
-            {formatRelativeTimestamp(document.createdAt)}
-            {document.nationality ? ` · ${NATIONALITY_LABELS[document.nationality]}` : ''}
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <ScreenHeader
+        variant="inline"
+        onBack={onBack}
+        accessibilityLabel="Back to documents"
+        right={
+          <TouchableOpacity
+            style={styles.renameButton}
+            onPress={isEditingName ? confirmRename : startEditingName}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={isEditingName ? 'Save name' : 'Rename document'}>
+            <Text style={styles.renameGlyph}>{isEditingName ? 'Save' : 'Rename'}</Text>
+          </TouchableOpacity>
+        }>
+        <Text style={styles.eyebrow}>DOCUMENT DETAILS</Text>
+        {isEditingName ? (
+          <TextInput
+            style={styles.titleInput}
+            value={nameInput}
+            onChangeText={setNameInput}
+            autoFocus
+            selectTextOnFocus
+            returnKeyType="done"
+            onSubmitEditing={confirmRename}
+          />
+        ) : (
+          <Text style={styles.title} numberOfLines={1}>
+            {document.label}
+            {document.nationality ? ` ${NATIONALITY_FLAGS[document.nationality]}` : ''}
           </Text>
-        </View>
-        <TouchableOpacity
-          style={styles.renameButton}
-          onPress={isEditingName ? confirmRename : startEditingName}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel={isEditingName ? 'Save name' : 'Rename document'}>
-          <Text style={styles.renameGlyph}>{isEditingName ? 'Save' : 'Rename'}</Text>
-        </TouchableOpacity>
-      </View>
+        )}
+        <Text style={styles.subtitle}>
+          {formatRelativeTimestamp(document.createdAt)}
+          {document.nationality ? ` · ${NATIONALITY_LABELS[document.nationality]}` : ''}
+        </Text>
+      </ScreenHeader>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -134,18 +133,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  headerText: {
-    flex: 1,
-    minWidth: 0,
   },
   eyebrow: {
     fontSize: 10,

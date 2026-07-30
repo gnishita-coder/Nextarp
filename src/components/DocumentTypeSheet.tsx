@@ -1,10 +1,10 @@
 import React from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons/static';
 import { GradientIconTile } from './GradientIconTile';
 import { colors, elevationShadow, radius, spacing } from '../theme';
-import { AppBackButton } from './AppBackButton';
+import { ScreenHeader } from './ScreenHeader';
 import type { DocumentType } from '../types';
 import { DOCUMENT_LABELS } from '../types';
 
@@ -26,21 +26,31 @@ const TYPE_DESCRIPTIONS: Record<(typeof SELECTABLE_TYPES)[number], string> = {
  * Home screen, per checklist item 2.3 ("Document type selection screen").
  */
 export function DocumentTypeSheet({ visible, onSelect, onClose }: Props) {
+  const insets = useSafeAreaInsets();
+
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="fullScreen"
       onRequestClose={onClose}>
-      <SafeAreaView style={styles.screen}>
-        <View style={styles.header}>
-          <AppBackButton onPress={onClose} accessibilityLabel="Back" />
+      <View
+        style={[
+          styles.screen,
+          { paddingTop: insets.top + 4, paddingBottom: insets.bottom },
+        ]}>
+        <ScreenHeader
+          variant="inline"
+          onBack={onClose}
+          accessibilityLabel="Back"
+        />
+
+        <View style={styles.headings}>
+          <Text style={styles.title}>Select document type</Text>
+          <Text style={styles.subtitle}>What are you scanning?</Text>
         </View>
 
         <View style={styles.content}>
-          <Text style={styles.title}>Select document type</Text>
-          <Text style={styles.subtitle}>What are you scanning?</Text>
-
           <View style={styles.options}>
             {SELECTABLE_TYPES.map(type => (
               <TouchableOpacity
@@ -69,7 +79,7 @@ export function DocumentTypeSheet({ visible, onSelect, onClose }: Props) {
           accessibilityLabel="Cancel document selection">
           <Text style={styles.cancelLabel}>Cancel</Text>
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
@@ -79,15 +89,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    height: 56,
-    justifyContent: 'center',
+  headings: {
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
   },
   content: {
     flex: 1,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
+    paddingTop: spacing.xxl,
   },
   title: {
     fontSize: 25,
@@ -102,7 +111,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   options: {
-    marginTop: spacing.xxl,
     gap: spacing.md,
   },
   option: {

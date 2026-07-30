@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { AppBackButton } from '../components/AppBackButton';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { colors, radius, spacing } from '../theme';
 import { formatFileSize } from '../storage';
 import type { QualityReport } from '../quality/imageQuality';
@@ -186,21 +186,18 @@ export function ReviewScreen({
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         bounces>
-        <View style={styles.header}>
-          <AppBackButton
-            style={styles.backButton}
-            onPress={onBack}
-            accessibilityLabel="Back to home"
-          />
-          <Text style={styles.title}>Review scan</Text>
-          <Text style={styles.subtitle}>Front side · {docLabel}</Text>
-        </View>
+        <ScreenHeader
+          onBack={onBack}
+          accessibilityLabel="Back to home"
+          title="Review scan"
+          subtitle={`Front side · ${docLabel}`}
+        />
 
         <View style={styles.previewCard}>
           <Image source={{ uri }} style={styles.preview} resizeMode="cover" />
@@ -258,7 +255,7 @@ export function ReviewScreen({
                 red, Retake is the only option, same as BackSideScreen. Next
                 only ever appears once every check has passed. */}
             {overallPass ? (
-              <PrimaryButton label="Next" onPress={onNext} loading={saving} />
+              <PrimaryButton label="Continue to back side" onPress={onNext} loading={saving} />
             ) : (
               <TouchableOpacity
                 style={[styles.retakeButton, saving && styles.retakeButtonDisabled]}
@@ -331,30 +328,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: 18,
     paddingBottom: 12,
-  },
-  header: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 68,
-    marginBottom: 7,
-  },
-  backButton: {
-    position: 'absolute',
-    left: 0,
-    top: 13,
-    zIndex: 1,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.navy,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 13,
-    color: colors.muted,
-    textAlign: 'center',
-    marginTop: 3,
   },
   previewCard: {
     borderRadius: 15,

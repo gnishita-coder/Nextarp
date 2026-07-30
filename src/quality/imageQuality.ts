@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import RNFS from 'react-native-fs';
 import { decode as decodeJpeg } from 'jpeg-js';
 import { toByteArray as base64ToBytes } from 'base64-js';
@@ -37,6 +38,9 @@ export interface QualityReport {
   warnings: string[];
   /** True if pixel-level analysis (blur/glare) couldn't run at all (e.g. decode failure). */
   analysisUnavailable: boolean;
+  /** Pixel dimensions used for quality checks (may differ from native metadata on iOS). */
+  analyzedWidth: number;
+  analyzedHeight: number;
 }
 
 // --- Tunable thresholds (starting points - see caveat above) ---
@@ -70,6 +74,17 @@ const EXPECTED_ASPECT_RATIO: Record<DocumentType, number> = {
 };
 const ASPECT_RATIO_TOLERANCE = 0.35;
 
+function resolutionPasses(width: number, height: number): boolean {
+  const longSide = Math.max(width, height);
+  const shortSide = Math.min(width, height);
+  if (Platform.OS === 'ios') {
+    // iOS Vision crops to the document quad, so edge lengths are often lower
+    // than Android ML Kit full-page scans even when the capture is sharp.
+    return longSide >= 640 && shortSide >= 380;
+  }
+  return width >= MIN_WIDTH && height >= MIN_HEIGHT;
+}
+
 export async function analyzeImageQuality(
   uri: string,
   width: number,
@@ -77,20 +92,8 @@ export async function analyzeImageQuality(
   documentType: DocumentType,
 ): Promise<QualityReport> {
   const warnings: string[] = [];
-
-  const resolutionOk = width >= MIN_WIDTH && height >= MIN_HEIGHT;
-  if (!resolutionOk) {
-    warnings.push('Resolution is lower than recommended - text may be hard to read.');
-  }
-
-  const longSide = Math.max(width, height);
-  const shortSide = Math.min(width, height) || 1;
-  const aspectRatio = longSide / shortSide;
-  const expected = EXPECTED_ASPECT_RATIO[documentType];
-  const aspectRatioOk = Math.abs(aspectRatio - expected) <= ASPECT_RATIO_TOLERANCE;
-  if (!aspectRatioOk) {
-    warnings.push('Aspect ratio looks off - the document may be cropped, rotated, or skewed.');
-  }
+  let effectiveWidth = Number(width) || 0;
+  let effectiveHeight = Number(height) || 0;
 
   let blurScore = NaN;
   let isBlurry = false;
@@ -109,6 +112,11 @@ export async function analyzeImageQuality(
       maxResolutionInMP: 30,
       maxMemoryUsageInMB: 512,
     });
+
+    if (Platform.OS === 'ios') {
+      effectiveWidth = Math.max(effectiveWidth, decoded.width);
+      effectiveHeight = Math.max(effectiveHeight, decoded.height);
+    }
 
     const pixelAnalysis = analyzePixels(decoded.data, decoded.width, decoded.height);
     blurScore = pixelAnalysis.blurScore;
@@ -131,6 +139,20 @@ export async function analyzeImageQuality(
     warnings.push('Could not run sharpness/glare analysis on this image.');
   }
 
+  const resolutionOk = resolutionPasses(effectiveWidth, effectiveHeight);
+  if (!resolutionOk) {
+    warnings.push('Resolution is lower than recommended - text may be hard to read.');
+  }
+
+  const longSide = Math.max(effectiveWidth, effectiveHeight);
+  const shortSide = Math.min(effectiveWidth, effectiveHeight) || 1;
+  const aspectRatio = longSide / shortSide;
+  const expected = EXPECTED_ASPECT_RATIO[documentType];
+  const aspectRatioOk = Math.abs(aspectRatio - expected) <= ASPECT_RATIO_TOLERANCE;
+  if (!aspectRatioOk) {
+    warnings.push('Aspect ratio looks off - the document may be cropped, rotated, or skewed.');
+  }
+
   const overallPass = resolutionOk && aspectRatioOk && !isBlurry && !hasGlare && !analysisUnavailable;
 
   return {
@@ -144,6 +166,8 @@ export async function analyzeImageQuality(
     overallPass,
     warnings,
     analysisUnavailable,
+    analyzedWidth: effectiveWidth,
+    analyzedHeight: effectiveHeight,
   };
 }
 

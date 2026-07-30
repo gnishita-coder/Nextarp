@@ -103,7 +103,8 @@ const NativeSinglePageScanner = NativeModules.SinglePageScanner as
 /**
  * Single-photo document capture with live edge overlay + automatic crop.
  * - Android: ML Kit Document Scanner with pageLimit = 1 (live edges + crop)
- * - iOS: custom camera with Vision live rectangle overlay + crop on shutter
+ * - iOS: custom AVFoundation camera + Apple Vision rectangle/document
+ *   detection (SinglePageScanner.mm), with shutter + auto-capture when stable
  */
 export async function launchSinglePageScanner(
   options: SinglePageScannerOptions,

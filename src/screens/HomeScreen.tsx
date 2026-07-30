@@ -77,12 +77,13 @@ export function HomeScreen({
         </View>
       </View>
 
-      <LinearGradient
-        colors={primaryGradient.colors}
-        start={primaryGradient.start}
-        end={primaryGradient.end}
-        style={styles.heroCard}
-      >
+      <View style={styles.heroCard}>
+        <LinearGradient
+          colors={primaryGradient.colors}
+          start={primaryGradient.start}
+          end={primaryGradient.end}
+          style={styles.heroGradient}
+        />
         <View style={styles.heroBlob} pointerEvents="none" />
 
         <View style={styles.heroIconWrap}>
@@ -107,7 +108,7 @@ export function HomeScreen({
           <Text style={styles.startScanLabel}>Start Scan</Text>
         </TouchableOpacity>
         <Text style={styles.autoModeCaption}>Automatic mode (recommended)</Text>
-      </LinearGradient>
+      </View>
 
       <View style={styles.listHeader}>
         <Text style={styles.listTitle}>Recent scans</Text>
@@ -121,7 +122,16 @@ export function HomeScreen({
       <FlatList
         data={documents.slice(0, 5)}
         keyExtractor={item => item.id}
-        contentContainerStyle={styles.listContent}
+        style={
+          Platform.OS === 'ios' && documents.length === 0
+            ? styles.listIOS
+            : styles.listAndroid
+        }
+        contentContainerStyle={[
+          styles.listContent,
+          Platform.OS === 'ios' && documents.length === 0 && styles.listContentEmptyIOS,
+        ]}
+        scrollEnabled={documents.length > 0}
         ListEmptyComponent={
           <Text style={styles.emptyText}>
             No scans yet. Tap "Scan a new document" to capture your first ID.
@@ -238,6 +248,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: spacing.lg,
     overflow: 'hidden',
+    position: 'relative',
+  },
+  heroGradient: {
+    ...StyleSheet.absoluteFillObject,
   },
   heroBlob: {
     position: 'absolute',
@@ -309,6 +323,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
   },
+  listAndroid: {
+    flex: 1,
+  },
+  listIOS: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  listContent: {
+    paddingBottom: spacing.xl,
+  },
+  listContentEmptyIOS: {
+    flexGrow: 0,
+  },
   listHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -325,9 +352,6 @@ const styles = StyleSheet.create({
     color: colors.purple,
     fontWeight: '600',
     fontSize: 14,
-  },
-  listContent: {
-    paddingBottom: spacing.xl,
   },
   emptyText: {
     color: colors.muted,

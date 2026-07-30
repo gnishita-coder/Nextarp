@@ -68,6 +68,7 @@ import { DocumentsScreen } from './src/screens/DocumentsScreen';
 import { DocumentDetailScreen } from './src/screens/DocumentDetailScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { ReviewScreen } from './src/screens/ReviewScreen';
+import { DocumentFlipScreen } from './src/screens/DocumentFlipScreen';
 import { BackSideScreen } from './src/screens/BackSideScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
 import { ScanningScreen } from './src/screens/ScanningScreen';
@@ -131,6 +132,11 @@ type Flow =
       quality: QualityReport;
       faceCheck: FaceCheckResult;
       nationalityCheck: NationalityCheckResult;
+    }
+  | {
+      /** Front validated + saved — cue user to flip before back capture. */
+      screen: 'flip';
+      documentType: DocumentType;
     }
   | {
       screen: 'backSide';
@@ -515,7 +521,6 @@ function App() {
         // Let the native scanner dismiss and paint the loading overlay before
         // JPEG decoding and quality analysis perform CPU-heavy work.
         await allowLoadingOverlayToRender();
-        const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
         const [quality, faceCheck, nationalityCheck] = await Promise.all([
           analyzeImageQuality(image.uri, image.width, image.height, documentType),
           checkContainsFace(image.uri),
@@ -524,6 +529,11 @@ function App() {
 
         setOperationLoading(null);
 
+        const photo: CapturedPhoto = {
+          path: image.uri,
+          width: quality.analyzedWidth || image.width,
+          height: quality.analyzedHeight || image.height,
+        };
         const reviewFlow: ReviewFlow = {
           screen: 'review',
           documentType,
@@ -620,13 +630,12 @@ function App() {
     [startFrontScan],
   );
 
-  /** Front Review's Next button: persists the front photo to this
-   * document's folder, then moves on to BackSideScreen (which starts out
-   * with no photo yet, prompting the user to capture the back). */
+  /** Front Review's Next button: persists the front photo, then shows the
+   * flip cue. Back camera opens only after the user continues from Flip. */
   const handleContinueToBackSide = useCallback(
     async (documentType: DocumentType, photo: CapturedPhoto) => {
       if (sessionFolderPath && sessionSides.some(side => side.side === 'front')) {
-        setFlow({ screen: 'backSide', documentType });
+        setFlow({ screen: 'flip', documentType });
         return;
       }
       setSaving(true);
@@ -640,7 +649,7 @@ function App() {
         );
         setSessionSides([savedSide]);
         setSessionFolderPath(folderPath);
-        setFlow({ screen: 'backSide', documentType });
+        setFlow({ screen: 'flip', documentType });
       } catch (err) {
         console.warn('[NextarpSDK] Failed to save the front side', err);
         Alert.alert(
@@ -715,8 +724,12 @@ function App() {
 
       const image = result.image;
       await allowLoadingOverlayToRender();
-      const photo: CapturedPhoto = { path: image.uri, width: image.width, height: image.height };
       const quality = await analyzeImageQuality(image.uri, image.width, image.height, documentType);
+      const photo: CapturedPhoto = {
+        path: image.uri,
+        width: quality.analyzedWidth || image.width,
+        height: quality.analyzedHeight || image.height,
+      };
 
       setFlow({
         screen: 'backSide',
@@ -733,10 +746,30 @@ function App() {
     }
   }, [captureMode]);
 
+  /** Flip screen CTA: open the back camera immediately from Flip.
+   * Do not show the empty BackSide "Capture back side" prompt first.
+   * After a successful capture we land on BackSide for review; on cancel
+   * we stay on Flip so the user can try again. */
+  const handleFlipContinue = useCallback(
+    (documentType: DocumentType) => {
+      handleCaptureBackSide(documentType);
+    },
+    [handleCaptureBackSide],
+  );
+
   /** BackSideScreen's Save button - persists the back photo, writes the
    * combined front+back document record to storage, and moves to Success. */
   const handleSaveBackSide = useCallback(
     async (documentType: DocumentType, photo: CapturedPhoto) => {
+      const hasFront = sessionSides.some(side => side.side === 'front');
+      if (!hasFront) {
+        Alert.alert(
+          'Front side missing',
+          'Please capture and confirm the front side before saving the back side.',
+        );
+        return;
+      }
+
       setSaving(true);
       try {
         const { folderPath, side: savedSide } = await persistCapturedPhoto(
@@ -749,6 +782,17 @@ function App() {
         );
 
         const updatedSides = [...sessionSides, savedSide];
+        if (
+          !updatedSides.some(side => side.side === 'front') ||
+          !updatedSides.some(side => side.side === 'back')
+        ) {
+          Alert.alert(
+            'Incomplete scan',
+            'Both front and back sides are required before this document can be saved.',
+          );
+          return;
+        }
+
         const record = await saveDocumentRecord(documentType, folderPath, updatedSides, nationality);
         const afterSave = await getSavedDocuments();
         console.log(
@@ -891,6 +935,20 @@ function App() {
                 setTimeout(() => setNationalityPickerVisible(true), 100);
               }}
               onNext={() => handleContinueToBackSide(flow.documentType, flow.photo)}
+            />
+          )}
+
+          {flow.screen === 'flip' && (
+            <DocumentFlipScreen
+              documentType={flow.documentType}
+              onBack={() => {
+                if (frontReviewFlow) {
+                  setFlow(frontReviewFlow);
+                } else {
+                  goHome();
+                }
+              }}
+              onContinue={() => handleFlipContinue(flow.documentType)}
             />
           )}
 

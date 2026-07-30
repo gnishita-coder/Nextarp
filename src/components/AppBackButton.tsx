@@ -26,16 +26,16 @@ export function AppBackButton({
       activeOpacity={0.72}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
-      hitSlop={{ top: 6, right: 6, bottom: 6, left: 6 }}>
-      <Ionicons name="chevron-back" size={23} color={colors.navy} />
+      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+      <Ionicons name="chevron-back" size={22} color={colors.navy} />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',

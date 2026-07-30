@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import RNFS from 'react-native-fs';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { AppBackButton } from '../components/AppBackButton';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { StepProgress } from '../components/StepProgress';
 import { colors, radius, spacing } from '../theme';
 import { formatFileSize } from '../storage';
@@ -126,23 +126,18 @@ export function BackSideScreen({
       : null;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         bounces>
-        <View style={styles.header}>
-          <AppBackButton
-            style={styles.backButton}
-            onPress={onBack}
-            accessibilityLabel="Go to previous screen"
-          />
-          <Text style={styles.title}>{hasPhoto ? 'Review scan' : 'Capture back side'}</Text>
-          <Text style={styles.subtitle}>
-            {hasPhoto ? `Back side · ${docLabel}` : 'Step 2 of 2'}
-          </Text>
-        </View>
+        <ScreenHeader
+          onBack={onBack}
+          accessibilityLabel="Go to previous screen"
+          title={hasPhoto ? 'Review scan' : 'Capture back side'}
+          subtitle={hasPhoto ? `Back side · ${docLabel}` : 'Step 2 of 2'}
+        />
 
         {!hasPhoto ? (
           <>
@@ -150,7 +145,7 @@ export function BackSideScreen({
             <View style={styles.emptyCopy}>
               <Text style={styles.emptyTitle}>Capture the back side</Text>
             <Text style={styles.emptyBody}>
-                Flip your {docLabel.toLowerCase()} over and place it inside the frame.
+                Please flip your {docLabel.toLowerCase()} and scan the back side.
             </Text>
             </View>
             <View style={styles.placeholderCard}>
@@ -252,29 +247,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: spacing.lg,
-  },
-  header: {
-    alignItems: 'center',
-    marginTop: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  backButton: {
-    position: 'absolute',
-    left: 0,
-    top: 6,
-    zIndex: 1,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.navy,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.muted,
-    textAlign: 'center',
-    marginTop: 4,
   },
   emptyCopy: {
     paddingHorizontal: spacing.md,
